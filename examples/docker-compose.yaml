@@ -1,0 +1,30 @@
+services:
+  cradlewise-mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: cradlewise-mediamtx
+    restart: unless-stopped
+    ports:
+      - "8560:8554/tcp"
+
+  cradlewise-bridge:
+    build:
+      context: ..
+    container_name: cradlewise-bridge
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    depends_on:
+      - cradlewise-mediamtx
+    command:
+      - --cradle-id
+      - ${CRADLEWISE_CRADLE_ID}
+      - --ip
+      - ${CRADLEWISE_CRIB_IP}
+      - --certs-dir
+      - /certs/${CRADLEWISE_CRADLE_ID}
+      - --output-url
+      - rtsp://cradlewise-mediamtx:8554/cradlewise
+    ports:
+      - "8088:8080/tcp"
+    volumes:
+      - ../certs:/certs:ro

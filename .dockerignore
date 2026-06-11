@@ -1,0 +1,16 @@
+.git/
+.pytest_cache/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+
+certs/
+decompiled/
+xapk_extracted/
+*.apk
+*.xapk
+
+fharr/

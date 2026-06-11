@@ -1,0 +1,30 @@
+# Extracted and decompiled APK files (large, regenerable)
+xapk_extracted/
+decompiled/
+*.xapk
+*.apk
+
+# Rust build artifacts
+target/
+
+# macOS
+.DS_Store
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Extracted certificates (sensitive!)
+certs/
+
+# Local service secrets
+.env
+.env.*
+!.env.example
+
+# Implementation plans
+fharr/
+
+# Local experiments
+fetch_flipbook.py

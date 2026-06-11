@@ -1,0 +1,26 @@
+{
+  "title": "Cradlewise Local",
+  "config": {
+    "abort": {
+      "already_configured": "This Cradlewise local stream is already configured"
+    },
+    "error": {
+      "invalid_stream_url": "Use an rtsp:// stream URL",
+      "invalid_snapshot_url": "Use an http:// or https:// snapshot URL",
+      "invalid_bridge_status_url": "Use an http:// or https:// bridge status URL"
+    },
+    "step": {
+      "user": {
+        "title": "Add Cradlewise local bridge",
+        "description": "Configure the camera entity that points at your local Cradlewise stream bridge.",
+        "data": {
+          "name": "Name",
+          "cradle_id": "Cradle ID",
+          "stream_url": "RTSP stream URL",
+          "snapshot_url": "Snapshot URL",
+          "bridge_status_url": "Bridge status URL"
+        }
+      }
+    }
+  }
+}

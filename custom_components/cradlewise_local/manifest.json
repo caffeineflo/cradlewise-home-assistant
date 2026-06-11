@@ -1,0 +1,13 @@
+{
+  "domain": "cradlewise_local",
+  "name": "Cradlewise Local",
+  "codeowners": ["@caffeineflo"],
+  "config_flow": true,
+  "documentation": "https://github.com/caffeineflo/cradlewise-local",
+  "dependencies": ["ffmpeg", "stream"],
+  "issue_tracker": "https://github.com/caffeineflo/cradlewise-local/issues",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "0.1.0"
+}
