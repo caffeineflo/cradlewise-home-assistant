@@ -127,6 +127,12 @@ class FfmpegRtspSink:
                 "zerolatency",
                 "-b:v",
                 self.video_bitrate,
+                "-g",
+                str(self.frame_rate),
+                "-keyint_min",
+                str(self.frame_rate),
+                "-sc_threshold",
+                "0",
                 "-pix_fmt",
                 "yuv420p",
             ]

@@ -26,6 +26,13 @@ def test_ffmpeg_rtsp_sink_command_uses_raw_bgr_and_pcm_inputs():
         command.index("-c:a") : command.index("-c:a") + 2
     ]
     assert ["-b:v", "1800k"] == command[command.index("-b:v") : command.index("-b:v") + 2]
+    assert ["-g", "12"] == command[command.index("-g") : command.index("-g") + 2]
+    assert ["-keyint_min", "12"] == command[
+        command.index("-keyint_min") : command.index("-keyint_min") + 2
+    ]
+    assert ["-sc_threshold", "0"] == command[
+        command.index("-sc_threshold") : command.index("-sc_threshold") + 2
+    ]
     assert command[-2:] == ["tcp", "rtsp://127.0.0.1:8554/cradlewise"]
 
 
