@@ -94,6 +94,18 @@ The example exposes:
 - Bridge state: `http://<host>:8088/state`
 - Bridge health: `http://<host>:8088/health`
 
+## Published Bridge Image
+
+CI builds and publishes the bridge image to GitHub Container Registry:
+
+```text
+ghcr.io/caffeineflo/cradlewise-local-bridge
+```
+
+Published tags include `main`, `latest`, the short git SHA, and release tags
+such as `v0.1.0`. For a server deployment, prefer pulling a published tag and
+recreating the bridge container deliberately rather than auto-deploying from CI.
+
 ## Local Development
 
 Run tests:
