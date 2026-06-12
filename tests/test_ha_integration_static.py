@@ -46,6 +46,17 @@ def test_url_helpers_accept_expected_bridge_urls():
     assert helpers.is_http_url("https://homeassistant.example/local/cradlewise.jpg")
 
 
+def test_snapshot_url_defaults_to_bridge_status_endpoint():
+    assert (
+        helpers.snapshot_url_from_status_url("http://127.0.0.1:8088/state")
+        == "http://127.0.0.1:8088/snapshot.jpg"
+    )
+    assert (
+        helpers.snapshot_url_from_status_url("http://127.0.0.1:8088/api/state")
+        == "http://127.0.0.1:8088/api/snapshot.jpg"
+    )
+
+
 def test_url_helpers_reject_wrong_schemes_or_missing_hosts():
     assert not helpers.is_rtsp_url("http://127.0.0.1:8554/cradlewise")
     assert not helpers.is_rtsp_url("rtsp:///cradlewise")

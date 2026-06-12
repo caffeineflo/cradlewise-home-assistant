@@ -14,7 +14,14 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from haffmpeg.tools import IMAGE_JPEG
 
-from .const import CONF_CRADLE_ID, CONF_SNAPSHOT_URL, CONF_STREAM_URL, DOMAIN
+from .config_helpers import snapshot_url_from_status_url
+from .const import (
+    CONF_BRIDGE_STATUS_URL,
+    CONF_CRADLE_ID,
+    CONF_SNAPSHOT_URL,
+    CONF_STREAM_URL,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +48,10 @@ class CradlewiseBridgeCamera(Camera):
         self._cradle_id = entry.data[CONF_CRADLE_ID]
         self._stream_url = entry.data[CONF_STREAM_URL]
         self._snapshot_url = entry.data.get(CONF_SNAPSHOT_URL)
+        if not self._snapshot_url and entry.data.get(CONF_BRIDGE_STATUS_URL):
+            self._snapshot_url = snapshot_url_from_status_url(
+                entry.data[CONF_BRIDGE_STATUS_URL]
+            )
         self._attr_name = entry.data.get(CONF_NAME, "Cradlewise Local")
         self._attr_unique_id = f"{self._cradle_id}_camera"
         self._attr_device_info = DeviceInfo(
@@ -54,6 +65,14 @@ class CradlewiseBridgeCamera(Camera):
         if " -i " in self._stream_url:
             return self._stream_url.rsplit(" -i ", maxsplit=1)[-1]
         return self._stream_url
+
+    async def async_turn_on(self) -> None:
+        """Handle camera turn-on service calls for always-on bridge streams."""
+        return None
+
+    async def async_turn_off(self) -> None:
+        """Handle camera turn-off service calls for always-on bridge streams."""
+        return None
 
     def _ffmpeg_input(self) -> str:
         if self._stream_url.startswith("rtsp://"):

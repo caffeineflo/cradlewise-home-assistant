@@ -7,7 +7,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 
-from .config_helpers import is_http_url, is_rtsp_url
+from .config_helpers import is_http_url, is_rtsp_url, snapshot_url_from_status_url
 from .const import (
     CONF_BRIDGE_STATUS_URL,
     CONF_CRADLE_ID,
@@ -42,6 +42,8 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors[CONF_BRIDGE_STATUS_URL] = "invalid_bridge_status_url"
 
             if not errors:
+                if not snapshot_url and bridge_status_url:
+                    snapshot_url = snapshot_url_from_status_url(bridge_status_url)
                 await self.async_set_unique_id(cradle_id)
                 self._abort_if_unique_id_configured(
                     updates={
