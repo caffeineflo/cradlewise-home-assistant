@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
+import time
 
 from aiortc.mediastreams import MediaStreamError
+import av
 from av.audio.resampler import AudioResampler
 
 from stream_local import CribStreamer, discover_crib_race
@@ -16,6 +19,25 @@ from .sinks import FrameSink
 from .status import BridgeStatusStore
 
 log = logging.getLogger(__name__)
+
+SNAPSHOT_INTERVAL_SECONDS = 1.0
+
+
+def encode_jpeg(image) -> bytes:
+    """Encode one BGR24 video frame as JPEG."""
+    height, width = image.shape[:2]
+    frame = av.VideoFrame.from_ndarray(image, format="bgr24")
+    buffer = io.BytesIO()
+    with av.open(buffer, mode="w", format="mjpeg") as output:
+        stream = output.add_stream("mjpeg", rate=1)
+        stream.width = width
+        stream.height = height
+        stream.pix_fmt = "yuvj420p"
+        for packet in stream.encode(frame):
+            output.mux(packet)
+        for packet in stream.encode():
+            output.mux(packet)
+    return buffer.getvalue()
 
 
 class BridgeStreamer(CribStreamer):
@@ -36,6 +58,7 @@ class BridgeStreamer(CribStreamer):
         self.beacon_topic = f"/{config.cradle_id}/beacon"
         self.cradle_state_topic = f"/cradle/{config.cradle_id}/cradle_state"
         self._audio_resampler = AudioResampler(format="s16", layout="mono", rate=48000)
+        self._last_snapshot_update = 0.0
 
     def _handle_mqtt_connected(self):
         self.status_store.set_mqtt_connected(True)
@@ -85,6 +108,13 @@ class BridgeStreamer(CribStreamer):
     def _handle_ice_connection_state(self, state):
         self.status_store.set_ice_state(state)
 
+    def _update_snapshot(self, image) -> None:
+        now = time.monotonic()
+        if now - self._last_snapshot_update < SNAPSHOT_INTERVAL_SECONDS:
+            return
+        self.status_store.update_snapshot(encode_jpeg(image))
+        self._last_snapshot_update = now
+
     async def _consume_video(self, track):
         log.info("Waiting for first video frame...")
         frame = await track.recv()
@@ -98,6 +128,7 @@ class BridgeStreamer(CribStreamer):
         self.sink.write(image.tobytes())
         self._frame_count = 1
         self.status_store.increment_video_frames()
+        self._update_snapshot(image)
 
         try:
             while True:
@@ -106,6 +137,7 @@ class BridgeStreamer(CribStreamer):
                 self.sink.write(image.tobytes())
                 self._frame_count += 1
                 self.status_store.increment_video_frames()
+                self._update_snapshot(image)
                 if self._frame_count % 300 == 0:
                     log.info("Frames bridged: %d", self._frame_count)
         except (asyncio.CancelledError, MediaStreamError):

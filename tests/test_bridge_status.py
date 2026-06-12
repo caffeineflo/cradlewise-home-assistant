@@ -1,6 +1,15 @@
 import json
+import socket
+import urllib.error
+import urllib.request
 
-from cradlewise_local.status import BridgeStatusStore
+from cradlewise_local.status import BridgeStatusHttpServer, BridgeStatusStore
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 
 def test_status_store_tracks_media_and_connection_state():
@@ -21,6 +30,44 @@ def test_status_store_tracks_media_and_connection_state():
     assert snapshot["media"]["video_frames"] == 1
     assert snapshot["media"]["audio_track"] is True
     assert snapshot["media"]["resolution"] == "1280x720"
+
+
+def test_status_store_caches_latest_snapshot_jpeg():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    jpeg = b"\xff\xd8frame\xff\xd9"
+
+    store.update_snapshot(jpeg)
+
+    assert store.snapshot_jpeg() == jpeg
+    assert store.snapshot()["media"]["last_snapshot_at"] is not None
+
+
+def test_status_http_server_serves_cached_snapshot_jpeg():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    server = BridgeStatusHttpServer(store, "127.0.0.1", _free_port())
+    server.start()
+
+    try:
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{server.port}/snapshot.jpg",
+                timeout=2,
+            ) as response:
+                raise AssertionError(f"expected HTTP 404, got {response.status}")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
+
+        store.update_snapshot(b"\xff\xd8frame\xff\xd9")
+
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{server.port}/snapshot.jpg",
+            timeout=2,
+        ) as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"] == "image/jpeg"
+            assert response.read() == b"\xff\xd8frame\xff\xd9"
+    finally:
+        server.close()
 
 
 def test_status_store_captures_cradle_state_and_beacon_payloads():

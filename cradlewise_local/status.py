@@ -259,6 +259,8 @@ class BridgeStatusStore:
     _last_cradle_state_at: float | None = None
     _last_device_state_at: float | None = None
     _last_device_state_source: str | None = None
+    _last_snapshot_jpeg: bytes | None = None
+    _last_snapshot_at: float | None = None
     _last_beacon_at: float | None = None
     _cradle_state: dict[str, Any] | None = None
     _device_state: dict[str, Any] | None = None
@@ -289,6 +291,15 @@ class BridgeStatusStore:
         with self._lock:
             self._video_frames += 1
             self._last_video_frame_at = _now()
+
+    def update_snapshot(self, jpeg: bytes) -> None:
+        with self._lock:
+            self._last_snapshot_jpeg = jpeg
+            self._last_snapshot_at = _now()
+
+    def snapshot_jpeg(self) -> bytes | None:
+        with self._lock:
+            return self._last_snapshot_jpeg
 
     def mark_audio_track(self) -> None:
         with self._lock:
@@ -357,6 +368,7 @@ class BridgeStatusStore:
                     "resolution": resolution,
                     "last_video_frame_at": self._last_video_frame_at,
                     "last_audio_frame_at": self._last_audio_frame_at,
+                    "last_snapshot_at": self._last_snapshot_at,
                 },
                 "cradle_state": {
                     "raw": cradle_state,
@@ -418,6 +430,18 @@ class BridgeStatusHttpServer:
                     body = store.to_json_bytes()
                     self.send_response(HTTPStatus.OK)
                     self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                elif self.path == "/snapshot.jpg":
+                    body = store.snapshot_jpeg()
+                    if body is None:
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                        return
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
