@@ -10,6 +10,7 @@ import signal
 import time
 
 from .cloud_state import poll_cloud_state
+from .commands import BridgeCommandHandler
 from .config import BridgeConfig, BridgeConfigError
 from .sinks import FfmpegRtspSink
 from .status import BridgeStatusHttpServer, BridgeStatusStore
@@ -135,10 +136,12 @@ async def async_main(args: argparse.Namespace) -> None:
         cradle_id=config.cradle_id,
         crib_ip=config.crib_ip or "discovery",
     )
+    command_handler = BridgeCommandHandler()
     status_server = BridgeStatusHttpServer(
         store=store,
         host=config.status_host,
         port=config.status_port,
+        command_handler=command_handler.handle_request,
     )
     status_server.start()
     logging.info(
@@ -146,7 +149,7 @@ async def async_main(args: argparse.Namespace) -> None:
         config.status_host,
         config.status_port,
     )
-    tasks = [asyncio.create_task(run_bridge(config, sink, store))]
+    tasks = [asyncio.create_task(run_bridge(config, sink, store, command_handler))]
     tasks.append(
         asyncio.create_task(
             monitor_media_freshness(store, config.media_stale_timeout)

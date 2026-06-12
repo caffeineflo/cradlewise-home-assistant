@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+
+from .commands import CommandError, CommandUnavailable
 
 SLEEP_PHASE_MAP = {
     0: "away",
@@ -43,9 +46,12 @@ DEVICE_STATE_KEYS = {
     "rawShadow",
     "baby_present",
     "baby_sleep_state",
+    "bounceLevel",
     "bounce_setting",
+    "musicLevel",
     "responsivity_setting",
     "soundSynth",
+    "volumeProfile",
 }
 
 
@@ -181,6 +187,9 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
         "bounce_amplitude": _int_or_none(
             _first_value(state, ("actuator", "amplitude"), ("rawShadow", "actuator", "amplitude"))
         ),
+        "bounce_level": _int_or_none(
+            _first_value(state, ("bounceLevel",), ("rawShadow", "bounceLevel"))
+        ),
         "bouncing": _first_value(
             state, ("actuator", "on"), ("rawShadow", "actuator", "on")
         ),
@@ -207,16 +216,27 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
                 ("rawShadow", "lullabies", "volume"),
             )
         ),
+        "music_level": _int_or_none(
+            _first_value(state, ("musicLevel",), ("rawShadow", "musicLevel"))
+        ),
         "music_mood": _first_value(
             state,
             ("music", "mood"),
             ("soundSynth", "trackName"),
             ("rawShadow", "soundSynth", "trackName"),
         ),
+        "volume_profile": _first_value(
+            state, ("volumeProfile",), ("rawShadow", "volumeProfile")
+        ),
         "light_on": _first_value(
             state, ("light", "lightOn"), ("rawShadow", "light", "lightOn")
         ),
         "light_intensity": light_intensity,
+        "light_indicator_brightness_mode": _first_value(
+            state,
+            ("light", "indicatorBrightnessMode"),
+            ("rawShadow", "light", "indicatorBrightnessMode"),
+        ),
         "battery_life": _int_or_none(
             _first_value(
                 state,
@@ -407,13 +427,23 @@ class BridgeStatusStore:
         return json.dumps(self.snapshot(), sort_keys=True).encode()
 
 
+CommandHandler = Callable[[dict[str, Any]], dict[str, Any]]
+
+
 class BridgeStatusHttpServer:
     """Small stdlib HTTP server for bridge status snapshots."""
 
-    def __init__(self, store: BridgeStatusStore, host: str, port: int) -> None:
+    def __init__(
+        self,
+        store: BridgeStatusStore,
+        host: str,
+        port: int,
+        command_handler: CommandHandler | None = None,
+    ) -> None:
         self.store = store
         self.host = host
         self.port = port
+        self.command_handler = command_handler
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -421,6 +451,7 @@ class BridgeStatusHttpServer:
         if self._httpd is not None:
             return
         store = self.store
+        command_handler = self.command_handler
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
@@ -456,6 +487,49 @@ class BridgeStatusHttpServer:
                 self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
                 self.wfile.write(encoded)
+
+            def do_POST(self) -> None:
+                if self.path != "/command":
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                if command_handler is None:
+                    self.send_error(HTTPStatus.SERVICE_UNAVAILABLE)
+                    return
+
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "invalid Content-Length")
+                    return
+                if length <= 0 or length > 4096:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "invalid request body")
+                    return
+
+                try:
+                    request_body = self.rfile.read(length)
+                    payload = json.loads(request_body)
+                except json.JSONDecodeError:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "invalid JSON")
+                    return
+                if not isinstance(payload, dict):
+                    self.send_error(HTTPStatus.BAD_REQUEST, "request must be an object")
+                    return
+
+                try:
+                    response = command_handler(payload)
+                except CommandError as exc:
+                    self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                    return
+                except CommandUnavailable as exc:
+                    self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+                    return
+
+                body = json.dumps(response, sort_keys=True).encode()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
 
             def log_message(self, format: str, *args: object) -> None:
                 return None

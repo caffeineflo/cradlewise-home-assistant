@@ -65,13 +65,23 @@ def test_url_helpers_reject_wrong_schemes_or_missing_hosts():
 
 
 def test_status_entities_include_community_state_surface():
+    init_source = Path("custom_components/cradlewise_local/__init__.py").read_text()
     sensor_source = Path("custom_components/cradlewise_local/sensor.py").read_text()
     binary_source = Path("custom_components/cradlewise_local/binary_sensor.py").read_text()
+    switch_source = Path("custom_components/cradlewise_local/switch.py").read_text()
+    number_source = Path("custom_components/cradlewise_local/number.py").read_text()
+    select_source = Path("custom_components/cradlewise_local/select.py").read_text()
+
+    for platform in ("Platform.NUMBER", "Platform.SELECT", "Platform.SWITCH"):
+        assert platform in init_source
 
     for key in (
         "sleep_phase",
         "bounce_mode",
+        "bounce_level",
         "music_volume",
+        "music_level",
+        "volume_profile",
         "light_intensity",
         "battery_life",
     ):
@@ -86,3 +96,18 @@ def test_status_entities_include_community_state_surface():
         "charging",
     ):
         assert f'key="{key}"' in binary_source
+
+    for key in ("actuator_on", "music_playing"):
+        assert f'key="{key}"' in switch_source
+
+    for key in (
+        "bounce_level",
+        "music_level",
+        "bounce_amplitude",
+        "music_volume",
+        "light_indicator_brightness",
+    ):
+        assert f'key="{key}"' in number_source
+
+    for key in ("bounce_mode", "music_mode", "volume_profile"):
+        assert f'key="{key}"' in select_source

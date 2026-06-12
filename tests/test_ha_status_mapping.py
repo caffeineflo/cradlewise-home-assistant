@@ -18,6 +18,15 @@ def test_build_state_url_keeps_explicit_state_url():
     assert helpers.build_state_url("http://bridge:8080/state") == "http://bridge:8080/state"
 
 
+def test_build_command_url_accepts_base_state_or_command_urls():
+    assert helpers.build_command_url("http://bridge:8080") == "http://bridge:8080/command"
+    assert helpers.build_command_url("http://bridge:8080/state") == "http://bridge:8080/command"
+    assert (
+        helpers.build_command_url("http://bridge:8080/command")
+        == "http://bridge:8080/command"
+    )
+
+
 def test_path_value_reads_nested_status_values():
     payload = {
         "bridge": {"healthy": True},

@@ -113,6 +113,11 @@ SENSORS: tuple[CradlewiseSensorDescription, ...] = (
         path=("device_state", "bounce_amplitude"),
     ),
     CradlewiseSensorDescription(
+        key="bounce_level",
+        name="Bounce Level",
+        path=("device_state", "bounce_level"),
+    ),
+    CradlewiseSensorDescription(
         key="responsivity_setting",
         name="Responsivity Setting",
         path=("device_state", "responsivity_setting"),
@@ -128,9 +133,19 @@ SENSORS: tuple[CradlewiseSensorDescription, ...] = (
         path=("device_state", "music_volume"),
     ),
     CradlewiseSensorDescription(
+        key="music_level",
+        name="Sound Level",
+        path=("device_state", "music_level"),
+    ),
+    CradlewiseSensorDescription(
         key="music_mode",
         name="Music Mode",
         path=("device_state", "music_mode"),
+    ),
+    CradlewiseSensorDescription(
+        key="volume_profile",
+        name="Volume Profile",
+        path=("device_state", "volume_profile"),
     ),
     CradlewiseSensorDescription(
         key="light_intensity",

@@ -12,7 +12,10 @@ from .coordinator import CradlewiseStatusCoordinator
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.CAMERA,
+    Platform.NUMBER,
+    Platform.SELECT,
     Platform.SENSOR,
+    Platform.SWITCH,
 ]
 
 

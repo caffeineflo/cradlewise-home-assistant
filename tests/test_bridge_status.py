@@ -127,11 +127,14 @@ def test_status_store_maps_rich_shadow_state():
                     "rockingNotEffective": False,
                     "mode": "Crib",
                     "bounceMode": "auto",
+                    "bounceLevel": 2,
                     "bounceSetting": "medium",
                     "responsivitySetting": "normal",
                     "actuator": {"on": True, "amplitude": 3.7},
                     "musicMode": "lullaby",
+                    "musicLevel": 3,
                     "music": {"play": True, "volume": 5.0, "mood": "calm"},
+                    "volumeProfile": "normal",
                     "light": {"lightOn": True, "lightIntensity": 40.0},
                     "deviceStatus": {
                         "batteryLife": 87.0,
@@ -150,11 +153,14 @@ def test_status_store_maps_rich_shadow_state():
     assert device_state["baby_present"] is True
     assert device_state["sleep_phase"] == "sleep"
     assert device_state["bounce_amplitude"] == 3
+    assert device_state["bounce_level"] == 2
     assert device_state["bouncing"] is True
     assert device_state["music_playing"] is True
     assert device_state["music_volume"] == 5
+    assert device_state["music_level"] == 3
     assert device_state["light_on"] is True
     assert device_state["light_intensity"] == 40
+    assert device_state["volume_profile"] == "normal"
     assert device_state["battery_life"] == 87
     assert device_state["charging"] is True
     assert device_state["power_supply_removed"] is False
@@ -187,9 +193,12 @@ def test_status_store_maps_live_cloud_state_shape():
             "rawShadow": {
                 "babySleepPhaseV2": {"eventValue": 4},
                 "bounceMode": 1,
+                "bounceLevel": 4,
                 "musicMode": 2,
+                "musicLevel": 5,
                 "light": {"indicatorBrightness": 30},
                 "detectedCradleMode": "Crib",
+                "volumeProfile": "max",
             },
         },
         source="cloud",
@@ -202,14 +211,17 @@ def test_status_store_maps_live_cloud_state_shape():
     assert device_state["sleep_phase"] == "sleep"
     assert device_state["bouncing"] is False
     assert device_state["bounce_setting"] == 2
+    assert device_state["bounce_level"] == 4
     assert device_state["bounce_mode"] == 1
     assert device_state["responsivity_setting"] == 3
     assert device_state["music_mode"] == 2
     assert device_state["music_playing"] is True
     assert device_state["music_volume"] == 4
+    assert device_state["music_level"] == 5
     assert device_state["music_mood"] == "rain"
     assert device_state["light_intensity"] == 30
     assert device_state["cradle_mode"] == "Crib"
+    assert device_state["volume_profile"] == "max"
 
 
 def test_status_store_returns_json_bytes():

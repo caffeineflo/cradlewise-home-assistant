@@ -6,14 +6,18 @@ import asyncio
 import io
 import json
 import logging
+import threading
 import time
+from typing import Any
 
 from aiortc.mediastreams import MediaStreamError
 import av
 from av.audio.resampler import AudioResampler
+from paho.mqtt.client import MQTT_ERR_SUCCESS
 
 from stream_local import CribStreamer, discover_crib_race
 
+from .commands import BridgeCommandHandler
 from .config import BridgeConfig
 from .sinks import FrameSink
 from .status import BridgeStatusStore
@@ -57,8 +61,10 @@ class BridgeStreamer(CribStreamer):
         self.status_store.crib_ip = crib_ip
         self.beacon_topic = f"/{config.cradle_id}/beacon"
         self.cradle_state_topic = f"/cradle/{config.cradle_id}/cradle_state"
+        self.shadow_update_topic = f"$aws/things/{config.cradle_id}/shadow/update"
         self._audio_resampler = AudioResampler(format="s16", layout="mono", rate=48000)
         self._last_snapshot_update = 0.0
+        self._command_lock = threading.Lock()
 
     def _handle_mqtt_connected(self):
         self.status_store.set_mqtt_connected(True)
@@ -94,6 +100,19 @@ class BridgeStreamer(CribStreamer):
             return
 
         super()._on_message(client, userdata, message)
+
+    def publish_shadow_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Publish a desired-state payload to the local shadow update topic."""
+        if self._mqtt is None or not self._mqtt.is_connected():
+            raise RuntimeError("MQTT is not connected")
+
+        data = json.dumps(payload, separators=(",", ":"))
+        log.info("Publishing command to %s", self.shadow_update_topic)
+        with self._command_lock:
+            result = self._mqtt.publish(self.shadow_update_topic, data)
+        if result.rc != MQTT_ERR_SUCCESS:
+            raise RuntimeError(f"MQTT publish failed with rc={result.rc}")
+        return payload
 
     async def _handle_track(self, track):
         if track.kind == "audio":
@@ -167,7 +186,14 @@ async def run_bridge(
     config: BridgeConfig,
     sink: FrameSink,
     status_store: BridgeStatusStore,
+    command_handler: BridgeCommandHandler | None = None,
 ) -> None:
     """Run the bridge until cancelled."""
     streamer = BridgeStreamer(config, sink, status_store)
-    await streamer.run()
+    if command_handler is not None:
+        command_handler.set_publisher(streamer.publish_shadow_payload)
+    try:
+        await streamer.run()
+    finally:
+        if command_handler is not None:
+            command_handler.clear_publisher()
