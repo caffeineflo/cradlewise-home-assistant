@@ -59,6 +59,20 @@ def test_bridge_config_enables_cloud_state_with_credentials(tmp_path):
     assert config.cloud_state_poll_interval == 60
 
 
+def test_bridge_config_accepts_media_stale_timeout(tmp_path):
+    certs_dir = tmp_path / "certs"
+    write_cert_set(certs_dir)
+
+    config = BridgeConfig.from_values(
+        cradle_id="cradle",
+        certs_dir=certs_dir,
+        output_url="rtsp://127.0.0.1:8554/cradlewise",
+        media_stale_timeout=120,
+    )
+
+    assert config.media_stale_timeout == 120
+
+
 def test_bridge_config_requires_cloud_credentials_together(tmp_path):
     certs_dir = tmp_path / "certs"
     write_cert_set(certs_dir)

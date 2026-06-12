@@ -8,7 +8,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 COPY cradlewise_local ./cradlewise_local
 COPY stream_local.py cradlewise_api.py ./
 

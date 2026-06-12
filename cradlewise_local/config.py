@@ -28,6 +28,7 @@ class BridgeConfig:
     cloud_email: str | None = None
     cloud_password: str | None = None
     cloud_state_poll_interval: int = 30
+    media_stale_timeout: int = 90
 
     @classmethod
     def from_values(
@@ -46,6 +47,7 @@ class BridgeConfig:
         cloud_email: str | None = None,
         cloud_password: str | None = None,
         cloud_state_poll_interval: int = 30,
+        media_stale_timeout: int = 90,
     ) -> "BridgeConfig":
         """Build and validate config from CLI-style values."""
         resolved_certs = Path(certs_dir) if certs_dir else Path("certs") / cradle_id
@@ -63,6 +65,7 @@ class BridgeConfig:
             cloud_email=cloud_email,
             cloud_password=cloud_password,
             cloud_state_poll_interval=cloud_state_poll_interval,
+            media_stale_timeout=media_stale_timeout,
         )
         config.validate()
         return config
@@ -80,6 +83,9 @@ class BridgeConfig:
 
         if self.cloud_state_poll_interval <= 0:
             raise BridgeConfigError("cloud_state_poll_interval must be positive")
+
+        if self.media_stale_timeout <= 0:
+            raise BridgeConfigError("media_stale_timeout must be positive")
 
         if bool(self.cloud_email) != bool(self.cloud_password):
             raise BridgeConfigError(

@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import signal
+import time
 
 from .cloud_state import poll_cloud_state
 from .config import BridgeConfig, BridgeConfigError
@@ -75,8 +76,35 @@ def build_parser() -> argparse.ArgumentParser:
         default=_env_int("CRADLEWISE_STATE_POLL_INTERVAL", 30),
         help="Seconds between optional Cradlewise cloud state polls",
     )
+    parser.add_argument(
+        "--media-stale-timeout",
+        type=int,
+        default=_env_int("CRADLEWISE_MEDIA_STALE_TIMEOUT", 90),
+        help="Restart bridge when video frames stop for this many seconds",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     return parser
+
+
+async def monitor_media_freshness(
+    store: BridgeStatusStore,
+    stale_timeout: int,
+) -> None:
+    """Raise when media has started once and then stops producing video."""
+    while True:
+        await asyncio.sleep(min(10, max(1, stale_timeout // 3)))
+        snapshot = store.snapshot()
+        media = snapshot["media"]
+        video_frames = media["video_frames"]
+        last_video_frame_at = media["last_video_frame_at"]
+        if video_frames <= 0 or last_video_frame_at is None:
+            continue
+
+        age = time.time() - last_video_frame_at
+        if age > stale_timeout:
+            raise RuntimeError(
+                f"video stream stale for {age:.0f}s; restarting bridge"
+            )
 
 
 async def async_main(args: argparse.Namespace) -> None:
@@ -94,6 +122,7 @@ async def async_main(args: argparse.Namespace) -> None:
         cloud_email=args.cloud_email,
         cloud_password=args.cloud_password,
         cloud_state_poll_interval=args.cloud_state_poll_interval,
+        media_stale_timeout=args.media_stale_timeout,
     )
     sink = FfmpegRtspSink(
         output_url=config.output_url,
@@ -117,15 +146,22 @@ async def async_main(args: argparse.Namespace) -> None:
         config.status_host,
         config.status_port,
     )
-    cloud_state_task = None
+    tasks = [asyncio.create_task(run_bridge(config, sink, store))]
+    tasks.append(
+        asyncio.create_task(
+            monitor_media_freshness(store, config.media_stale_timeout)
+        )
+    )
     if config.cloud_state_enabled:
-        cloud_state_task = asyncio.create_task(poll_cloud_state(config, store))
+        tasks.append(asyncio.create_task(poll_cloud_state(config, store)))
     try:
-        await run_bridge(config, sink, store)
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        for task in done:
+            task.result()
     finally:
-        if cloud_state_task is not None:
-            cloud_state_task.cancel()
-            await asyncio.gather(cloud_state_task, return_exceptions=True)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         status_server.close()
 
 
