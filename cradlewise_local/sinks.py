@@ -7,17 +7,23 @@ import queue
 import subprocess
 import threading
 from dataclasses import dataclass
-from typing import BinaryIO, Protocol
+from typing import BinaryIO, Literal, Protocol
 
 
 class FrameSink(Protocol):
-    """Accepts decoded media frames from aiortc."""
+    """Accepts media frames from aiortc."""
 
     def start(self, width: int, height: int) -> None:
-        """Prepare the sink for frames of the given size."""
+        """Prepare the sink for decoded frames of the given size."""
+
+    def start_h264(self) -> None:
+        """Prepare the sink for encoded H.264 access units."""
 
     def write(self, frame_bytes: bytes) -> None:
         """Write one BGR24 frame."""
+
+    def write_h264(self, frame_bytes: bytes) -> None:
+        """Write one Annex B H.264 access unit."""
 
     def write_audio(self, frame_bytes: bytes) -> None:
         """Write one chunk of signed 16-bit little-endian PCM audio."""
@@ -39,7 +45,14 @@ class NullSink:
         self.width = width
         self.height = height
 
+    def start_h264(self) -> None:
+        self.width = None
+        self.height = None
+
     def write(self, frame_bytes: bytes) -> None:
+        self.frames += 1
+
+    def write_h264(self, frame_bytes: bytes) -> None:
         self.frames += 1
 
     def write_audio(self, frame_bytes: bytes) -> None:
@@ -51,16 +64,18 @@ class NullSink:
 
 @dataclass
 class FfmpegRtspSink:
-    """Push raw BGR frames to an RTSP endpoint using ffmpeg."""
+    """Push video and audio to an RTSP endpoint using ffmpeg."""
 
     output_url: str
     ffmpeg_path: str = "ffmpeg"
     frame_rate: int = 10
     video_bitrate: str = "2500k"
+    video_input: Literal["h264", "raw_bgr"] = "h264"
     enable_audio: bool = True
     audio_sample_rate: int = 48000
     audio_channels: int = 1
     audio_bitrate: str = "96k"
+    rtp_packet_size: int = 1200
     loglevel: str = "warning"
     process: subprocess.Popen | None = None
     audio_stdin: BinaryIO | None = None
@@ -71,8 +86,8 @@ class FfmpegRtspSink:
 
     def build_command(
         self,
-        width: int,
-        height: int,
+        width: int | None = None,
+        height: int | None = None,
         audio_pipe: str = "pipe:3",
     ) -> list[str]:
         """Return the ffmpeg command for the current output settings."""
@@ -81,20 +96,42 @@ class FfmpegRtspSink:
             "-hide_banner",
             "-loglevel",
             self.loglevel,
-            "-re",
             "-thread_queue_size",
             "512",
-            "-f",
-            "rawvideo",
-            "-pixel_format",
-            "bgr24",
-            "-video_size",
-            f"{width}x{height}",
-            "-framerate",
-            str(self.frame_rate),
-            "-i",
-            "pipe:0",
         ]
+        if self.video_input == "h264":
+            command.extend(
+                [
+                    "-fflags",
+                    "+genpts",
+                    "-use_wallclock_as_timestamps",
+                    "1",
+                    "-f",
+                    "h264",
+                    "-r",
+                    str(self.frame_rate),
+                    "-i",
+                    "pipe:0",
+                ]
+            )
+        else:
+            if width is None or height is None:
+                raise ValueError("width and height are required for raw_bgr video")
+            command.extend(
+                [
+                    "-re",
+                    "-f",
+                    "rawvideo",
+                    "-pixel_format",
+                    "bgr24",
+                    "-video_size",
+                    f"{width}x{height}",
+                    "-framerate",
+                    str(self.frame_rate),
+                    "-i",
+                    "pipe:0",
+                ]
+            )
         if self.enable_audio:
             command.extend(
                 [
@@ -117,26 +154,29 @@ class FfmpegRtspSink:
         else:
             command.append("-an")
 
-        command.extend(
-            [
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-tune",
-                "zerolatency",
-                "-b:v",
-                self.video_bitrate,
-                "-g",
-                str(self.frame_rate),
-                "-keyint_min",
-                str(self.frame_rate),
-                "-sc_threshold",
-                "0",
-                "-pix_fmt",
-                "yuv420p",
-            ]
-        )
+        if self.video_input == "h264":
+            command.extend(["-c:v", "copy"])
+        else:
+            command.extend(
+                [
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-tune",
+                    "zerolatency",
+                    "-b:v",
+                    self.video_bitrate,
+                    "-g",
+                    str(self.frame_rate),
+                    "-keyint_min",
+                    str(self.frame_rate),
+                    "-sc_threshold",
+                    "0",
+                    "-pix_fmt",
+                    "yuv420p",
+                ]
+            )
         if self.enable_audio:
             command.extend(
                 [
@@ -157,12 +197,24 @@ class FfmpegRtspSink:
                 "rtsp",
                 "-rtsp_transport",
                 "tcp",
+                "-pkt_size",
+                str(self.rtp_packet_size),
                 self.output_url,
             ]
         )
         return command
 
     def start(self, width: int, height: int) -> None:
+        if self.video_input != "raw_bgr":
+            raise RuntimeError("start() is only valid for raw_bgr video input")
+        self._start(width=width, height=height)
+
+    def start_h264(self) -> None:
+        if self.video_input != "h264":
+            raise RuntimeError("start_h264() is only valid for h264 video input")
+        self._start()
+
+    def _start(self, width: int | None = None, height: int | None = None) -> None:
         if self.process is not None:
             return
         audio_read_fd: int | None = None
@@ -203,6 +255,13 @@ class FfmpegRtspSink:
                 os.close(audio_write_fd)
 
     def write(self, frame_bytes: bytes) -> None:
+        if self.process is None or self.video_queue is None:
+            raise RuntimeError("ffmpeg sink has not been started")
+        if self.process.poll() is not None:
+            raise RuntimeError(f"ffmpeg exited with status {self.process.returncode}")
+        self._offer(self.video_queue, frame_bytes)
+
+    def write_h264(self, frame_bytes: bytes) -> None:
         if self.process is None or self.video_queue is None:
             raise RuntimeError("ffmpeg sink has not been started")
         if self.process.poll() is not None:

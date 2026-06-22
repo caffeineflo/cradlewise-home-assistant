@@ -153,6 +153,28 @@ channels=1
 The HA custom camera still returned a 1280x720 JPEG through
 `camera_proxy` after audio was enabled.
 
+On 2026-06-22, the bridge was changed to pass the crib's H264 video through
+instead of decoding BGR frames and re-encoding with ffmpeg. The bridge still
+decodes locally for snapshots, but the RTSP video track is copied from the
+depacketized WebRTC H264 access units:
+
+```text
+codec_name=h264
+profile=Constrained Baseline
+width=1280
+height=720
+avg_frame_rate=10/1
+
+codec_name=aac
+sample_rate=48000
+channels=1
+```
+
+For Scrypted/HomeKit, use the Rebroadcast/Prebuffer plugin with `FFmpeg (TCP)`
+as the RTSP parser for this stream. Scrypted's direct RTSP parser can complete
+DESCRIBE/SETUP/PLAY against MediaMTX and still time out waiting for parsed
+media; the ffmpeg parser reads the same URL reliably.
+
 The HA integration also creates bridge/media entities and a
 community-compatible state surface. As of 2026-06-11, the deployed integration
 loads those entities successfully; the cloud-backed state entities are expected

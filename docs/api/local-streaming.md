@@ -178,6 +178,12 @@ Verified by successfully streaming from a real crib:
 | Audio codec | Opus 48kHz/2ch (payload type 96) |
 | RTP packet size | ~1188 bytes typical |
 
+The RTSP bridge should preserve the video bitstream. The current bridge
+depacketizes WebRTC H264 access units, starts publishing at an SPS/PPS/IDR sync
+point, and uses ffmpeg `-c:v copy` for the RTSP video track. Audio is still
+decoded from WebRTC Opus, resampled to mono 48 kHz PCM, and encoded to AAC for
+RTSP consumers.
+
 ## Session Management
 
 - **Session ID:** Epoch timestamp in milliseconds (string), generated fresh per `startVideo()` call

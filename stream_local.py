@@ -377,6 +377,7 @@ class CribStreamer:
         @self._pc.on("track")
         async def on_track(track):
             log.info("Track received: %s", track.kind)
+            self._prepare_track(track)
             asyncio.ensure_future(self._handle_track(track))
 
         @self._pc.on("connectionstatechange")
@@ -489,6 +490,9 @@ class CribStreamer:
             await self._consume_video(track)
         elif track.kind == "audio":
             log.info("Audio track received (not displayed)")
+
+    def _prepare_track(self, track):
+        return None
 
     def _handle_webrtc_connection_state(self, state):
         return None

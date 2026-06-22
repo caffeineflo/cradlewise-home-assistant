@@ -19,6 +19,7 @@ from stream_local import CribStreamer, discover_crib_race
 
 from .commands import BridgeCommandHandler
 from .config import BridgeConfig
+from .encoded import EncodedVideoFrame, h264_nal_types, install_encoded_frame_tap
 from .sinks import FrameSink
 from .status import BridgeStatusStore
 
@@ -45,7 +46,7 @@ def encode_jpeg(image) -> bytes:
 
 
 class BridgeStreamer(CribStreamer):
-    """Cradlewise streamer that sends decoded video frames to a sink."""
+    """Cradlewise streamer that copies H.264 video to a sink."""
 
     def __init__(
         self,
@@ -53,6 +54,7 @@ class BridgeStreamer(CribStreamer):
         sink: FrameSink,
         status_store: BridgeStatusStore,
     ):
+        install_encoded_frame_tap()
         crib_ip = config.crib_ip or discover_crib_race(config.cradle_id)
         super().__init__(crib_ip, config.cradle_id, config.certs_dir)
         self.config = config
@@ -63,6 +65,10 @@ class BridgeStreamer(CribStreamer):
         self.cradle_state_topic = f"/cradle/{config.cradle_id}/cradle_state"
         self.shadow_update_topic = f"$aws/things/{config.cradle_id}/shadow/update"
         self._audio_resampler = AudioResampler(format="s16", layout="mono", rate=48000)
+        self._encoded_video_queue: asyncio.Queue[EncodedVideoFrame | None] = (
+            asyncio.Queue()
+        )
+        self._snapshot_decoder = av.CodecContext.create("h264", "r")
         self._last_snapshot_update = 0.0
         self._command_lock = threading.Lock()
 
@@ -121,6 +127,10 @@ class BridgeStreamer(CribStreamer):
             return
         await super()._handle_track(track)
 
+    def _prepare_track(self, track):
+        if track.kind == "video":
+            track._queue.encoded_passthrough_queue = self._encoded_video_queue
+
     def _handle_webrtc_connection_state(self, state):
         self.status_store.set_webrtc_state(state)
 
@@ -134,29 +144,48 @@ class BridgeStreamer(CribStreamer):
         self.status_store.update_snapshot(encode_jpeg(image))
         self._last_snapshot_update = now
 
+    def _decode_for_snapshot(self, data: bytes) -> None:
+        try:
+            frames = self._snapshot_decoder.decode(av.Packet(data))
+        except av.FFmpegError as exc:
+            log.debug("Snapshot decoder skipped H.264 frame: %s", exc)
+            return
+
+        for frame in frames:
+            image = frame.to_ndarray(format="bgr24")
+            height, width = image.shape[:2]
+            self.status_store.set_video_resolution(width, height)
+            self._update_snapshot(image)
+
+    @staticmethod
+    def _is_h264_sync_point(data: bytes) -> bool:
+        nal_types = set(h264_nal_types(data))
+        return {5, 7, 8}.issubset(nal_types)
+
     async def _consume_video(self, track):
-        log.info("Waiting for first video frame...")
-        frame = await track.recv()
-        image = frame.to_ndarray(format="bgr24")
-        height, width = image.shape[:2]
-        log.info("Video resolution: %dx%d", width, height)
-        self.status_store.set_video_resolution(width, height)
-        self.status_store.set_webrtc_state("connected")
-        self.status_store.set_ice_state("completed")
-        self.sink.start(width, height)
-        self.sink.write(image.tobytes())
-        self._frame_count = 1
-        self.status_store.increment_video_frames()
-        self._update_snapshot(image)
+        log.info("Waiting for first H.264 keyframe...")
+        sink_started = False
+        self._frame_count = 0
 
         try:
             while True:
-                frame = await track.recv()
-                image = frame.to_ndarray(format="bgr24")
-                self.sink.write(image.tobytes())
+                encoded_frame = await self._encoded_video_queue.get()
+                if encoded_frame is None:
+                    raise MediaStreamError
+
+                if not sink_started:
+                    if not self._is_h264_sync_point(encoded_frame.data):
+                        continue
+                    self.sink.start_h264()
+                    sink_started = True
+                    self.status_store.set_webrtc_state("connected")
+                    self.status_store.set_ice_state("completed")
+                    log.info("H.264 passthrough started")
+
+                self.sink.write_h264(encoded_frame.data)
                 self._frame_count += 1
                 self.status_store.increment_video_frames()
-                self._update_snapshot(image)
+                self._decode_for_snapshot(encoded_frame.data)
                 if self._frame_count % 300 == 0:
                     log.info("Frames bridged: %d", self._frame_count)
         except (asyncio.CancelledError, MediaStreamError):

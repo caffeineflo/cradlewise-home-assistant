@@ -10,7 +10,7 @@ This is early software. It works in a live Home Assistant setup, but it still ne
 
 Working now:
 
-- Local H264 video bridged to RTSP
+- Local H264 video copied to RTSP without re-encoding
 - Crib audio muxed into the same RTSP stream as AAC mono
 - Home Assistant camera entity
 - Bridge health, MQTT, WebRTC, and media counters
@@ -29,7 +29,7 @@ Still planned:
 Cradlewise crib
   -> local MQTT/WebRTC over LAN
   -> cradlewise-local bridge
-  -> RTSP audio/video
+  -> RTSP H264 passthrough + AAC audio
   -> MediaMTX or another RTSP server
   -> Home Assistant camera
 ```
