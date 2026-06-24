@@ -51,6 +51,27 @@ BINARY_SENSORS: tuple[CradlewiseBinarySensorDescription, ...] = (
         device_class=BinarySensorDeviceClass.OCCUPANCY,
     ),
     CradlewiseBinarySensorDescription(
+        key="baby_present_previous",
+        name="Baby Present Previous",
+        path=("device_state", "baby_present_previous"),
+        device_class=BinarySensorDeviceClass.OCCUPANCY,
+    ),
+    CradlewiseBinarySensorDescription(
+        key="has_baby_ever_been_placed",
+        name="Has Baby Ever Been Placed",
+        path=("device_state", "has_baby_ever_been_placed"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="baby_presence_being_determined",
+        name="Baby Presence Being Determined",
+        path=("device_state", "baby_presence_being_determined"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="sleep_state_being_determined",
+        name="Sleep State Being Determined",
+        path=("device_state", "sleep_state_being_determined"),
+    ),
+    CradlewiseBinarySensorDescription(
         key="baby_needs_attention",
         name="Baby Needs Attention",
         path=("device_state", "baby_needs_attention"),
@@ -73,9 +94,54 @@ BINARY_SENSORS: tuple[CradlewiseBinarySensorDescription, ...] = (
         path=("device_state", "bouncing"),
     ),
     CradlewiseBinarySensorDescription(
+        key="bounce_disabled",
+        name="Bounce Disabled",
+        path=("device_state", "bounce_disabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="bounce_super_gentle",
+        name="Bounce Super Gentle",
+        path=("device_state", "bounce_super_gentle"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="bounce_always_on",
+        name="Bounce Always On",
+        path=("device_state", "bounce_always_on"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="bounce_tap_detection_enabled",
+        name="Bounce Tap Detection Enabled",
+        path=("device_state", "bounce_tap_detection_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="bounce_push_gesture_enabled",
+        name="Bounce Push Gesture Enabled",
+        path=("device_state", "bounce_push_gesture_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="bounce_quiescent",
+        name="Bounce Quiescent",
+        path=("device_state", "bounce_quiescent"),
+    ),
+    CradlewiseBinarySensorDescription(
         key="music_playing",
         name="Music Playing",
         path=("device_state", "music_playing"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="sound_spotify_service_enabled",
+        name="Sound Spotify Service Enabled",
+        path=("device_state", "sound_spotify_service_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="lullabies_enabled",
+        name="Lullabies Enabled",
+        path=("device_state", "lullabies_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="lullabies_timer_on",
+        name="Lullabies Timer",
+        path=("device_state", "lullabies_timer_on"),
     ),
     CradlewiseBinarySensorDescription(
         key="light_on",
@@ -103,6 +169,128 @@ BINARY_SENSORS: tuple[CradlewiseBinarySensorDescription, ...] = (
         name="Rocking Not Effective",
         path=("device_state", "rocking_not_effective"),
         device_class=BinarySensorDeviceClass.PROBLEM,
+    ),
+    CradlewiseBinarySensorDescription(
+        key="obstruction_detected",
+        name="Obstruction Detected",
+        path=("device_state", "obstruction_detected"),
+        device_class=BinarySensorDeviceClass.PROBLEM,
+    ),
+    CradlewiseBinarySensorDescription(
+        key="breath_trigger",
+        name="Breath Trigger",
+        path=("device_state", "breath_trigger"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="lower_breath_rate_alert",
+        name="Lower Breath Rate Alert",
+        path=("device_state", "lower_breath_rate_alert"),
+        device_class=BinarySensorDeviceClass.PROBLEM,
+    ),
+    CradlewiseBinarySensorDescription(
+        key="keep_bounce_on_during_sleep",
+        name="Keep Bounce On During Sleep",
+        path=("device_state", "keep_bounce_on_during_sleep"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="keep_music_on_during_sleep",
+        name="Keep Music On During Sleep",
+        path=("device_state", "keep_music_on_during_sleep"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="auto_mode_lock_on",
+        name="Auto Mode Lock",
+        path=("device_state", "auto_mode_lock_on"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="update_available",
+        name="Update Available",
+        path=("device_state", "update_available"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="update_first",
+        name="Update First",
+        path=("device_state", "update_first"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="is_calibration_done",
+        name="Calibration Done",
+        path=("device_state", "is_calibration_done"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="app_flip_video",
+        name="App Flip Video",
+        path=("device_state", "app_flip_video"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="max_sound_preview",
+        name="Max Sound Preview",
+        path=("device_state", "max_sound_preview"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="control_adaptive_soothing_enabled",
+        name="Control Adaptive Soothing Enabled",
+        path=("device_state", "control_adaptive_soothing_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="control_breath_enabled",
+        name="Control Breath Enabled",
+        path=("device_state", "control_breath_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="start_recipe_on",
+        name="Start Recipe",
+        path=("device_state", "start_recipe_on"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="start_recipe_enabled",
+        name="Start Recipe Enabled",
+        path=("device_state", "start_recipe_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="keep_bounce_on_during_sleep_is_on",
+        name="Keep Bounce On During Sleep Is On",
+        path=("device_state", "keep_bounce_on_during_sleep_is_on"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="keep_music_on_during_sleep_is_on",
+        name="Keep Music On During Sleep Is On",
+        path=("device_state", "keep_music_on_during_sleep_is_on"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="enable_acc_movement_detection",
+        name="Enable ACC Movement Detection",
+        path=("device_state", "enable_acc_movement_detection"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="enable_coeff_sensor_update",
+        name="Enable Coeff Sensor Update",
+        path=("device_state", "enable_coeff_sensor_update"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="upload_3d_data_enabled",
+        name="Upload 3D Data Enabled",
+        path=("device_state", "upload_3d_data_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="upload_rgb_data_enabled",
+        name="Upload RGB Data Enabled",
+        path=("device_state", "upload_rgb_data_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="significant_change_in_weight_enabled",
+        name="Significant Change In Weight Enabled",
+        path=("device_state", "significant_change_in_weight_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="weight_detection_enabled",
+        name="Weight Detection Enabled",
+        path=("device_state", "weight_detection_enabled"),
+    ),
+    CradlewiseBinarySensorDescription(
+        key="restart_ggc_requested",
+        name="Restart GGC Requested",
+        path=("device_state", "restart_ggc_requested"),
     ),
     CradlewiseBinarySensorDescription(
         key="charging",

@@ -33,10 +33,70 @@ SWITCHES: tuple[CradlewiseSwitchDescription, ...] = (
         command="actuator_on",
     ),
     CradlewiseSwitchDescription(
+        key="disable_bounce",
+        name="Disable Bounce",
+        path=("device_state", "bounce_disabled"),
+        command="disable_bounce",
+    ),
+    CradlewiseSwitchDescription(
+        key="super_gentle_bounce",
+        name="Super Gentle Bounce",
+        path=("device_state", "bounce_super_gentle"),
+        command="super_gentle_bounce",
+    ),
+    CradlewiseSwitchDescription(
+        key="always_on_bounce",
+        name="Always On Bounce",
+        path=("device_state", "bounce_always_on"),
+        command="always_on_bounce",
+    ),
+    CradlewiseSwitchDescription(
+        key="tap_detection_enabled",
+        name="Tap Detection",
+        path=("device_state", "bounce_tap_detection_enabled"),
+        command="tap_detection_enabled",
+    ),
+    CradlewiseSwitchDescription(
+        key="push_gesture_enabled",
+        name="Push Gesture",
+        path=("device_state", "bounce_push_gesture_enabled"),
+        command="push_gesture_enabled",
+    ),
+    CradlewiseSwitchDescription(
         key="music_playing",
         name="Music",
         path=("device_state", "music_playing"),
         command="music_playing",
+    ),
+    CradlewiseSwitchDescription(
+        key="keep_music_on_during_sleep",
+        name="Keep Music On During Sleep",
+        path=("device_state", "keep_music_on_during_sleep"),
+        command="keep_music_on_during_sleep",
+    ),
+    CradlewiseSwitchDescription(
+        key="keep_bounce_on_during_sleep",
+        name="Keep Bounce On During Sleep",
+        path=("device_state", "keep_bounce_on_during_sleep"),
+        command="keep_bounce_on_during_sleep",
+    ),
+    CradlewiseSwitchDescription(
+        key="auto_mode_lock_on",
+        name="Auto Mode Lock",
+        path=("device_state", "auto_mode_lock_on"),
+        command="auto_mode_lock_on",
+    ),
+    CradlewiseSwitchDescription(
+        key="start_recipe_enabled",
+        name="Start Recipe Enabled",
+        path=("device_state", "start_recipe_enabled"),
+        command="start_recipe_enabled",
+    ),
+    CradlewiseSwitchDescription(
+        key="adaptive_soothing_enabled",
+        name="Adaptive Soothing",
+        path=("device_state", "control_adaptive_soothing_enabled"),
+        command="adaptive_soothing_enabled",
     ),
 )
 

@@ -3,7 +3,12 @@ import socket
 import urllib.error
 import urllib.request
 
-from cradlewise_local.status import BridgeStatusHttpServer, BridgeStatusStore
+import pytest
+
+from cradlewise_local.status import (
+    BridgeStatusHttpServer,
+    BridgeStatusStore,
+)
 
 
 def _free_port() -> int:
@@ -191,14 +196,163 @@ def test_status_store_maps_live_cloud_state_shape():
             "actuator": {"on": False, "amplitude": 1},
             "soundSynth": {"play": True, "trackName": "rain", "volume": 4},
             "rawShadow": {
-                "babySleepPhaseV2": {"eventValue": 4},
+                "actuator": {
+                    "accFramePeaksThreshold": 10,
+                    "bounceAlwaysOn": False,
+                    "bounceAlwaysOnIntensity": 3,
+                    "bounceSuperGentle": False,
+                    "disableBouncing": True,
+                    "duration": 15,
+                    "durationLimit": 30,
+                    "movementEnergyThreshold": 50,
+                    "pushGestureEnable": True,
+                    "quiescentBounce": False,
+                    "tapDetectionEnable": True,
+                    "tiltState": 0,
+                    "timeRemaining": 0,
+                },
+                "appSettings": {"flipVideo": False},
+                "autoModeLockDuration": 10,
+                "babySleepPhaseV2": {
+                    "durationStartTime": "2026-06-24 01:08:31.968945",
+                    "eventStartTime": "2026-06-24 02:10:31.856625",
+                    "eventValue": 4,
+                    "presentToggleTime": "2026-06-24 01:08:20.242141",
+                },
+                "babySleepState": 5,
+                "babySleepStateInternal": 0,
+                "babySleepStateBeingDetermined": False,
+                "babyPresenceBeingDetermined": False,
+                "babyPresentPrev": True,
+                "babyMonitor": {
+                    "breath": {
+                        "finalRate": -1,
+                        "rate": -1,
+                        "reason": -1,
+                        "state": 0,
+                    },
+                    "breathTrigger": False,
+                    "lowerBreathRateAlert": False,
+                },
+                "bluetooth": {
+                    "wifiStats": json.dumps(
+                        {
+                            "ARPSuccessCount": 870870,
+                            "BeaconLossCount": 1,
+                            "bitrate": 72200000,
+                            "noise": -85,
+                            "rssi0": -50,
+                            "rssi1": -44,
+                            "ssid": "Nursery",
+                            "strength": 77,
+                        }
+                    )
+                },
                 "bounceMode": 1,
                 "bounceLevel": 4,
+                "calibrateCradle": 0,
+                "calibrationHistory": {
+                    "complete": "success",
+                    "gainSetup": "success",
+                    "micSetup": "success",
+                    "noiseProfileSetup": "success",
+                    "tofCalibration": "success",
+                    "weightCalibration": "success",
+                },
+                "calibrationStatus": {"stage": "", "status": ""},
+                "calibrationType": 1,
+                "connectivity": {
+                    "wifiScore": {
+                        "Jitter": 3,
+                        "Loss": 3,
+                        "SNR": 3,
+                        "Speed": 3,
+                        "WiFi": 3,
+                    }
+                },
+                "control": {
+                    "adaptiveSoothingEnabled": False,
+                    "bnaAlertControl": 8,
+                    "breathEnabled": True,
+                    "crySensitivity": 1,
+                    "cssResponsiveness": "low",
+                    "videoServiceBitMask": 0,
+                },
+                "deviceStatus": {
+                    "ambientTemp": 23750,
+                    "uptimeService": 35997.596906,
+                    "uptimeTotal": 36006.22,
+                },
+                "deployState": 4,
                 "musicMode": 2,
                 "musicLevel": 5,
+                "musicDuration": 60,
+                "musicTimeRemaining": -1,
+                "operationState": 9,
+                "lullabies": {
+                    "action": 1,
+                    "curSongId": "hpx4mmji",
+                    "desiredPlaylistId": "bfalhqi6",
+                    "desiredSongId": "",
+                    "elapsedTime": 0,
+                    "enableMusic": False,
+                    "loop": "all",
+                    "timerDuration": 30,
+                    "timerOn": False,
+                    "volume": 45,
+                },
+                "maxBounceLimit": 55,
+                "maxSoundPreview": False,
+                "maxVolumeLimit": 45,
+                "meta": {
+                    "babyProfileLastUpdatedTime": "2025-03-24 20:49:01.573754",
+                    "rootfs_version": "6.25",
+                    "shadow_version": 1,
+                    "software_version": "0.2.72",
+                    "timezone": "America/New_York",
+                },
                 "light": {"indicatorBrightness": 30},
                 "detectedCradleMode": "Crib",
+                "obstructionToFDetected": False,
+                "userActionForObstruction": "",
                 "volumeProfile": "max",
+                "keepBounceOnDuringSleep": False,
+                "keepBounceOnDuringSleepLevel": 0,
+                "keepMusicOnDuringSleep": True,
+                "keepMusicOnDuringSleepLevel": 2,
+                "autoModeLockOn": False,
+                "autoModeLockEndTime": "",
+                "startRecipeOn": False,
+                "startRecipeEnabled": False,
+                "startRecipeLockEndTime": "",
+                "startRecipeLockDuration": 15,
+                "startRecipeBounceLevel": -1,
+                "startRecipeMusicLevel": 2,
+                "state": 1,
+                "reportWrongStatus": "",
+                "sequenceId": 0,
+                "shadowSync": {"restartGGCRequest": False},
+                "soundSynth": {
+                    "ambience": 0,
+                    "breathVolume": 0,
+                    "color": 1,
+                    "heartbeatVolume": 100,
+                    "spotifyServiceEnable": True,
+                },
+                "update": {
+                    "available": False,
+                    "errReason": "none",
+                    "first": False,
+                    "progress": 0,
+                    "status": "NONE",
+                    "step": "download",
+                    "type": "partial",
+                    "version": "0.0",
+                },
+                "upload3DDataEnable": True,
+                "uploadRGBDataEnable": True,
+                "significantChangeInWeightEnable": False,
+                "weightDetectionEnable": False,
             },
         },
         source="cloud",
@@ -209,6 +363,15 @@ def test_status_store_maps_live_cloud_state_shape():
     assert device_state["baby_present"] is True
     assert device_state["sleep_state"] == "asleep"
     assert device_state["sleep_phase"] == "sleep"
+    assert device_state["sleep_phase_raw"] == 4
+    assert device_state["sleep_event"] == "sleep"
+    assert device_state["sleep_state_raw"] == 5
+    assert device_state["sleep_state_internal"] == 0
+    assert device_state["sleep_state_being_determined"] is False
+    assert device_state["sleep_phase_event_start_time"] == "2026-06-24 02:10:31.856625"
+    assert device_state["sleep_phase_duration_start_time"] == "2026-06-24 01:08:31.968945"
+    assert device_state["sleep_phase_present_toggle_time"] == "2026-06-24 01:08:20.242141"
+    assert device_state["baby_presence_being_determined"] is False
     assert device_state["bouncing"] is False
     assert device_state["bounce_setting"] == 2
     assert device_state["bounce_level"] == 4
@@ -222,6 +385,168 @@ def test_status_store_maps_live_cloud_state_shape():
     assert device_state["light_intensity"] == 30
     assert device_state["cradle_mode"] == "Crib"
     assert device_state["volume_profile"] == "max"
+    assert device_state["music_duration"] == 60
+    assert device_state["music_time_remaining"] == -1
+    assert device_state["ambient_temperature"] == 23.75
+    assert device_state["device_uptime_service"] == 35997.596906
+    assert device_state["device_uptime_total"] == 36006.22
+    assert device_state["reported_state"] == 1
+    assert device_state["deploy_state"] == 4
+    assert device_state["sequence_id"] == 0
+    assert device_state["report_wrong_status"] == ""
+    assert device_state["operation_state"] == 9
+    assert device_state["calibrate_cradle"] == "idle"
+    assert device_state["calibrate_cradle_raw"] == 0
+    assert device_state["calibration_type"] == "partial"
+    assert device_state["calibration_type_raw"] == 1
+    assert device_state["calibration_stage"] == ""
+    assert device_state["calibration_status"] == ""
+    assert device_state["calibration_history_complete"] == "success"
+    assert device_state["calibration_history_gain_setup"] == "success"
+    assert device_state["calibration_history_mic_setup"] == "success"
+    assert device_state["calibration_history_noise_profile_setup"] == "success"
+    assert device_state["calibration_history_tof_calibration"] == "success"
+    assert device_state["calibration_history_weight_calibration"] == "success"
+    assert device_state["obstruction_detected"] is False
+    assert device_state["user_action_for_obstruction"] == ""
+    assert device_state["baby_present_previous"] is True
+    assert device_state["bounce_disabled"] is True
+    assert device_state["bounce_super_gentle"] is False
+    assert device_state["bounce_always_on"] is False
+    assert device_state["bounce_always_on_intensity"] == 3
+    assert device_state["bounce_duration"] == 15
+    assert device_state["bounce_duration_limit"] == 30
+    assert device_state["bounce_time_remaining"] == 0
+    assert device_state["bounce_tap_detection_enabled"] is True
+    assert device_state["bounce_push_gesture_enabled"] is True
+    assert device_state["bounce_quiescent"] is False
+    assert device_state["bounce_tilt_state"] == 0
+    assert device_state["bounce_movement_energy_threshold"] == 50
+    assert device_state["bounce_acc_frame_peaks_threshold"] == 10
+    assert device_state["wifi_score"] == 3
+    assert device_state["wifi_score_snr"] == 3
+    assert device_state["wifi_score_speed"] == 3
+    assert device_state["wifi_score_loss"] == 3
+    assert device_state["wifi_score_jitter"] == 3
+    assert device_state["wifi_stats_strength"] == 77
+    assert device_state["wifi_stats_rssi0"] == -50
+    assert device_state["wifi_stats_rssi1"] == -44
+    assert device_state["wifi_stats_noise"] == -85
+    assert device_state["wifi_stats_bitrate"] == 72200000
+    assert device_state["wifi_stats_ssid"] == "Nursery"
+    assert device_state["wifi_stats_arp_success_count"] == 870870
+    assert device_state["wifi_stats_beacon_loss_count"] == 1
+    assert device_state["software_version"] == "0.2.72"
+    assert device_state["rootfs_version"] == "6.25"
+    assert device_state["shadow_version"] == 1
+    assert device_state["cradle_timezone"] == "America/New_York"
+    assert device_state["update_available"] is False
+    assert device_state["update_status"] == "NONE"
+    assert device_state["update_step"] == "download"
+    assert device_state["update_version"] == "0.0"
+    assert device_state["update_progress"] == 0
+    assert device_state["update_type"] == "partial"
+    assert device_state["update_error_reason"] == "none"
+    assert device_state["control_adaptive_soothing_enabled"] is False
+    assert device_state["control_bna_alert_control"] == 8
+    assert device_state["control_breath_enabled"] is True
+    assert device_state["control_cry_sensitivity"] == 1
+    assert device_state["control_css_responsiveness"] == "low"
+    assert device_state["control_video_service_bit_mask"] == 0
+    assert device_state["breath_rate"] == -1
+    assert device_state["breath_final_rate"] == -1
+    assert device_state["breath_state"] == 0
+    assert device_state["breath_reason"] == -1
+    assert device_state["breath_trigger"] is False
+    assert device_state["lower_breath_rate_alert"] is False
+    assert device_state["keep_bounce_on_during_sleep"] is False
+    assert device_state["keep_bounce_on_during_sleep_level"] == 0
+    assert device_state["keep_music_on_during_sleep"] is True
+    assert device_state["keep_music_on_during_sleep_level"] == 2
+    assert device_state["auto_mode_lock_on"] is False
+    assert device_state["auto_mode_lock_duration"] == 10
+    assert device_state["auto_mode_lock_end_time"] == ""
+    assert device_state["start_recipe_on"] is False
+    assert device_state["start_recipe_enabled"] is False
+    assert device_state["start_recipe_lock_end_time"] == ""
+    assert device_state["start_recipe_lock_duration"] == 15
+    assert device_state["start_recipe_bounce_level"] == -1
+    assert device_state["start_recipe_music_level"] == 2
+    assert device_state["sound_ambience"] == "light rain"
+    assert device_state["sound_ambience_raw"] == 0
+    assert device_state["sound_color"] == "pink"
+    assert device_state["sound_color_raw"] == 1
+    assert device_state["sound_heartbeat_volume"] == 100
+    assert device_state["sound_breath_volume"] == 0
+    assert device_state["sound_spotify_service_enabled"] is True
+    assert device_state["lullabies_action"] == 1
+    assert device_state["lullabies_current_song_id"] == "hpx4mmji"
+    assert device_state["lullabies_desired_playlist_id"] == "bfalhqi6"
+    assert device_state["lullabies_desired_song_id"] == ""
+    assert device_state["lullabies_elapsed_time"] == 0
+    assert device_state["lullabies_enabled"] is False
+    assert device_state["lullabies_loop"] == "all"
+    assert device_state["lullabies_timer_duration"] == 30
+    assert device_state["lullabies_timer_on"] is False
+    assert device_state["lullabies_volume"] == 45
+    assert device_state["app_flip_video"] is False
+    assert device_state["max_bounce_limit"] == 55
+    assert device_state["max_volume_limit"] == 45
+    assert device_state["max_sound_preview"] is False
+    assert device_state["upload_3d_data_enabled"] is True
+    assert device_state["upload_rgb_data_enabled"] is True
+    assert device_state["significant_change_in_weight_enabled"] is False
+    assert device_state["weight_detection_enabled"] is False
+    assert device_state["restart_ggc_requested"] is False
+
+
+@pytest.mark.parametrize(
+    ("raw_phase", "expected_phase"),
+    [
+        (0, "away"),
+        (1, "awake"),
+        (2, "stirring"),
+        (3, "stirring"),
+        (4, "sleep"),
+        (5, "awake"),
+        (6, "stirring"),
+        (99, "unknown (99)"),
+    ],
+)
+def test_status_store_maps_apk_sleep_phase_values(raw_phase, expected_phase):
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    store.update_device_state(
+        {"rawShadow": {"babySleepPhaseV2": {"eventValue": raw_phase}}},
+        source="cloud",
+    )
+
+    device_state = store.snapshot()["device_state"]
+
+    assert device_state["sleep_phase"] == expected_phase
+
+
+@pytest.mark.parametrize(
+    ("raw_phase", "expected_event"),
+    [
+        (0, "away"),
+        (1, "awake"),
+        (2, "awake"),
+        (3, "stirring"),
+        (4, "sleep"),
+        (5, "sleep"),
+        (6, "unknown (6)"),
+    ],
+)
+def test_status_store_maps_apk_sleep_event_values(raw_phase, expected_event):
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    store.update_device_state(
+        {"rawShadow": {"babySleepPhaseV2": {"eventValue": raw_phase}}},
+        source="cloud",
+    )
+
+    device_state = store.snapshot()["device_state"]
+
+    assert device_state["sleep_event"] == expected_event
 
 
 def test_status_store_returns_json_bytes():

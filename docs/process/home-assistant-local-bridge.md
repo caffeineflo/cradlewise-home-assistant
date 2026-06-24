@@ -123,6 +123,16 @@ The custom component is intentionally thin. It gives HA a normal camera entity
 through `stream_source()` and reads all non-camera state from the bridge
 `/state` endpoint.
 
+## Optional Wake Event Recording
+
+The repo includes an optional Home Assistant helper for recording wake events
+with pre-roll and post-roll. It is intentionally kept outside the core
+integration because it opens the RTSP stream continuously and writes clips to
+local media storage.
+
+Use `docs/process/wake-event-recording.md` if you want Home Assistant to store a
+clip when the baby is present and Cradlewise reports a wake or attention event.
+
 ## Verified Smoke Test
 
 On 2026-06-10, the local bridge published to MediaMTX and a separate client
@@ -175,30 +185,64 @@ as the RTSP parser for this stream. Scrypted's direct RTSP parser can complete
 DESCRIBE/SETUP/PLAY against MediaMTX and still time out waiting for parsed
 media; the ffmpeg parser reads the same URL reliably.
 
-The HA integration also creates bridge/media entities and a
-community-compatible state surface. As of 2026-06-11, the deployed integration
-loads those entities successfully; the cloud-backed state entities are expected
-to report `unknown` until cloud credentials are added to the bridge.
+The HA integration also creates bridge/media entities, a community-compatible
+state surface, and selected APK-backed controls. Cloud-backed state entities
+are expected to report `unknown` until cloud credentials are added to the
+bridge; once cloud polling is configured, the bridge normalizes the useful
+shadow/live-state fields into `/state`.
 
 ## Later Layers
 
-- Add controls for selected Cradlewise actions after the state surface is
-  validated.
 - Add analytics entities for daily sleep/awake/nap/soothe metrics.
 - Verify HA recording behavior with the muxed audio stream.
-- Add snapshots and recording retention after the RTSP bridge is stable.
+- Add first-class recording retention settings after the RTSP bridge is stable.
 
 ## Entity Map To Revisit
 
 Use the existing community names as the compatibility baseline where the same
 concept exists:
 
-- Binary sensors: online, baby present, baby needs attention/help, crib helping,
-  bouncing, music playing, light on, loud sound, sleep schedule/window, charging.
-- Sensors: sleep state/phase, cradle mode, bounce mode/setting/amplitude,
-  responsivity setting, music mode/mood/volume, light intensity, sleep/wake
-  times, firmware, daily sleep/awake/nap/soothe metrics.
+- Binary sensors: online, baby present/determining/previously-present, sleep
+  determining, baby needs attention/help, crib helping, bouncing, actuator
+  toggles, music/lullabies playing, light on, loud sound, sleep
+  schedule/window, obstruction, breath alert/trigger, charging, update
+  available, calibration done, firmware upload/weight-detection flags.
+- Sensors: sleep state/phase, APK sleep event classification, sleep phase
+  timestamps, cradle mode, calibration request/type/history, bounce
+  mode/setting/amplitude/timers/diagnostics, responsivity setting, music
+  mode/mood/volume/duration/timer, soundSynth color/ambience/volumes,
+  lullabies song/timer values, light intensity, ambient temperature, device
+  uptime, device-state source/update diagnostics, operation/deploy/reported
+  raw state, WiFi score and parsed WiFi stats, breath state/rate,
+  update/firmware versions, sleep/wake times, daily sleep/awake/nap/soothe
+  metrics.
 
 The current implementation includes the bridge/media entities plus the
-baby/sleep/music/light/device-status surface. Firmware and analytics entities
-still need a dedicated source and tests.
+baby/sleep/music/light/device-status/raw-shadow surface. Firmware and update
+state are mapped from the shadow. Analytics entities still need a dedicated
+source and tests. The complete normalized live `device_state` surface is
+covered by HA entities except the full `raw` payload, which intentionally stays
+inside the bridge response instead of being recorded into HA history.
+
+## Control Surface
+
+The integration exposes normal app-backed desired-shadow controls where the APK
+method and payload shape are clear:
+
+- Switches: bounce, disable bounce, super-gentle bounce, always-on bounce, tap
+  detection, push gesture, music, keep music/bounce on during sleep, auto mode
+  lock, start recipe enabled, adaptive soothing.
+- Numbers: bounce/music levels, bounce amplitude/duration/setting, always-on
+  bounce intensity, responsivity, music volume/duration, night-light
+  brightness, keep-on-during-sleep levels, auto mode lock duration, max
+  bounce/volume limits, start recipe levels/duration.
+- Selects: bounce mode, music mode, volume profile, night-light brightness
+  mode, cry sensitivity.
+
+The integration intentionally does not expose APK actions that are setup,
+diagnostic, privacy-sensitive, or require more context before HA automation:
+calibration start/terminate, hardware self-test, breath torso/keepalive
+publishing, cradle time zone writes, upload-data privacy toggles, wrong-status
+reporting, firmware commands, system reboot/shutdown, and raw shadow debug
+fields. Unknown numeric states such as `operationState`, `deployState`, and
+reported shadow `state` stay raw until APK labels are found.

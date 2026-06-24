@@ -77,6 +77,32 @@ def test_status_entities_include_community_state_surface():
 
     for key in (
         "sleep_phase",
+        "sleep_phase_raw",
+        "sleep_event",
+        "sleep_state_raw",
+        "ambient_temperature",
+        "operation_state",
+        "reported_state",
+        "deploy_state",
+        "calibrate_cradle",
+        "calibration_type",
+        "calibration_history_complete",
+        "cradle_mode_to_calibrate",
+        "bounce_duration",
+        "bounce_time_remaining",
+        "sound_ambience",
+        "sound_color",
+        "lullabies_current_song_id",
+        "lullabies_timer_duration",
+        "wifi_score",
+        "wifi_stats_strength",
+        "wifi_stats_rssi0",
+        "software_version",
+        "update_status",
+        "control_cry_sensitivity",
+        "breath_rate",
+        "device_state_source",
+        "device_state_updated_at",
         "bounce_mode",
         "bounce_level",
         "music_volume",
@@ -89,25 +115,68 @@ def test_status_entities_include_community_state_surface():
 
     for key in (
         "baby_present",
+        "baby_present_previous",
+        "has_baby_ever_been_placed",
         "baby_needs_attention",
         "bouncing",
+        "bounce_disabled",
+        "bounce_tap_detection_enabled",
         "music_playing",
+        "lullabies_enabled",
+        "sound_spotify_service_enabled",
         "light_on",
+        "obstruction_detected",
+        "breath_trigger",
+        "auto_mode_lock_on",
+        "update_available",
+        "control_breath_enabled",
+        "upload_3d_data_enabled",
+        "upload_rgb_data_enabled",
         "charging",
     ):
         assert f'key="{key}"' in binary_source
 
-    for key in ("actuator_on", "music_playing"):
+    for key in (
+        "actuator_on",
+        "disable_bounce",
+        "super_gentle_bounce",
+        "always_on_bounce",
+        "tap_detection_enabled",
+        "push_gesture_enabled",
+        "music_playing",
+        "keep_music_on_during_sleep",
+        "keep_bounce_on_during_sleep",
+        "auto_mode_lock_on",
+        "start_recipe_enabled",
+        "adaptive_soothing_enabled",
+    ):
         assert f'key="{key}"' in switch_source
 
     for key in (
         "bounce_level",
         "music_level",
         "bounce_amplitude",
+        "bounce_duration",
+        "always_on_bounce_intensity",
+        "keep_music_on_during_sleep_level",
+        "keep_bounce_on_during_sleep_level",
+        "music_duration",
+        "auto_mode_lock_duration",
+        "max_bounce_limit",
+        "max_volume_limit",
+        "start_recipe_music_level",
+        "start_recipe_bounce_level",
+        "start_recipe_lock_duration",
         "music_volume",
         "light_indicator_brightness",
     ):
         assert f'key="{key}"' in number_source
 
-    for key in ("bounce_mode", "music_mode", "volume_profile"):
+    for key in (
+        "bounce_mode",
+        "music_mode",
+        "volume_profile",
+        "light_indicator_mode",
+        "cry_sensitivity",
+    ):
         assert f'key="{key}"' in select_source

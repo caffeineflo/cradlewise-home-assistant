@@ -1,8 +1,8 @@
 # Cradlewise Local
 
-Cradlewise Local bridges a Cradlewise smart crib into Home Assistant with a local audio/video stream and optional cloud-backed state sensors.
+Cradlewise Local bridges a Cradlewise smart crib into Home Assistant with a local audio/video stream, optional cloud-backed state sensors, and selected crib controls.
 
-The bridge connects to the crib over the LAN using the local Greengrass MQTT/WebRTC path, publishes an ordinary RTSP stream, and exposes a small HTTP status API. The Home Assistant custom integration creates a camera entity from that RTSP stream and maps bridge/device state into sensors and binary sensors.
+The bridge connects to the crib over the LAN using the local Greengrass MQTT/WebRTC path, publishes an ordinary RTSP stream, and exposes a small HTTP status/command API. The Home Assistant custom integration creates a camera entity from that RTSP stream and maps bridge/device state into sensors, binary sensors, and controls.
 
 ## Status
 
@@ -14,11 +14,15 @@ Working now:
 - Crib audio muxed into the same RTSP stream as AAC mono
 - Home Assistant camera entity
 - Bridge health, MQTT, WebRTC, and media counters
-- Optional cloud state polling for baby presence, sleep phase/state, bouncing, music, light, and selected crib settings
+- Optional cloud state polling for APK-backed baby, sleep, bounce, music,
+  light, firmware/update, calibration, WiFi, breath, lullaby, and crib setting
+  state
+- Home Assistant controls for normal soothing/settings actions such as
+  bounce/music mode, levels, timers, lock duration, volume limits, start recipe,
+  and adaptive/cry sensitivity settings
 
 Still planned:
 
-- Home Assistant controls for selected crib actions
 - Sleep analytics entities
 - Packaged releases and HACS release workflow
 - More fixture coverage for alternate Cradlewise payload shapes
@@ -52,6 +56,16 @@ The integration asks for:
 - RTSP stream URL, for example `rtsp://192.0.2.20:8560/cradlewise`
 - Optional bridge status URL, for example `http://192.0.2.20:8088/state`
 - Optional snapshot URL if you expose snapshots separately
+
+## Optional Wake Event Recording
+
+The repository includes an optional Home Assistant helper that records wake
+events with two minutes of pre-roll and two minutes of post-roll. It uses the
+Cradlewise RTSP stream plus the integration's baby/sleep entities, and stores
+clips under Home Assistant's `/media` directory.
+
+See [Wake Event Recording](docs/process/wake-event-recording.md) for the helper
+script and YAML snippets.
 
 ## Bridge Deployment
 
@@ -134,6 +148,7 @@ uv run cradlewise-local \
 The repo includes protocol notes and reverse-engineering references under `docs/`. The most useful starting points are:
 
 - [Home Assistant Local Bridge](docs/process/home-assistant-local-bridge.md)
+- [Wake Event Recording](docs/process/wake-event-recording.md)
 - [Authentication & Certificates](docs/process/authentication.md)
 - [Local Video Streaming](docs/api/local-streaming.md)
 - [MQTT Topics & Shadow](docs/api/mqtt-topics.md)

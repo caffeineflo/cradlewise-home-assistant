@@ -1,0 +1,17 @@
+cradlewise_wake_buffer_start: >-
+  CRADLEWISE_WAKE_STREAM_URL="rtsp://192.0.2.20:8560/cradlewise"
+  CRADLEWISE_WAKE_STATUS_URL="http://192.0.2.20:8088/state"
+  python3 /config/cradlewise_wake_recorder.py buffer
+  > /config/cradlewise_wake_buffer.log 2>&1 &
+
+cradlewise_wake_event_record: >-
+  CRADLEWISE_WAKE_STREAM_URL="rtsp://192.0.2.20:8560/cradlewise"
+  CRADLEWISE_WAKE_STATUS_URL="http://192.0.2.20:8088/state"
+  python3 /config/cradlewise_wake_recorder.py event
+  > /config/cradlewise_wake_event.log 2>&1 &
+
+cradlewise_wake_gallery_refresh: >-
+  CRADLEWISE_WAKE_STREAM_URL="rtsp://192.0.2.20:8560/cradlewise"
+  CRADLEWISE_WAKE_STATUS_URL="http://192.0.2.20:8088/state"
+  python3 /config/cradlewise_wake_recorder.py gallery
+  > /config/cradlewise_wake_gallery.log 2>&1 &

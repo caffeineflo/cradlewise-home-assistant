@@ -132,21 +132,23 @@ crib is on a different subnet, use `--ip` to specify the crib's IP directly.
 | Local MQTT connection | Working | Mutual TLS, device UUID as client ID |
 | WebRTC signaling | Working | getOffer/sendResponse/ICE via MQTT |
 | DTLS-SRTP | Working | Requires RSA cert + broad cipher list (aiortc workaround) |
-| Video display | Working | H264 720p via ffplay |
-| Audio playback | Not yet | OPUS track received but dropped in `_consume_video` |
-| Device shadow / state | Not yet | Shadow updates arrive on MQTT but are ignored |
+| Video bridge | Working | H264 720p passthrough to RTSP |
+| Audio bridge | Working | OPUS input muxed into RTSP as AAC mono |
+| Device shadow / state | Working | Bridge normalizes APK-backed shadow/live state into `/state` |
 | Two-way audio | Unknown | App has volume control; needs investigation |
-| Crib controls (bounce, etc.) | Not yet | Likely via MQTT shadow desired state |
+| Crib controls (bounce, etc.) | Working, bounded | Normal soothing/settings controls publish APK-shaped desired shadow fragments |
+| APK/debug actions | Intentionally not exposed | Calibration start, hardware self-test, breath coordinate publishing, time zone writes, privacy upload toggles, and wrong-status reporting need separate review before HA exposure |
 
-## Future: Home Assistant Integration
+## Home Assistant Integration
 
-The goal is to turn this into a Home Assistant custom component. Key considerations:
+This repo now includes a Home Assistant custom component. Key considerations:
 
-- HA has native WebRTC camera support (`RTSPtoWebRTC` / `go2rtc`) -- investigate whether we can feed our stream into that pipeline instead of reimplementing video display
+- HA uses the bridge RTSP stream for the camera and the bridge HTTP API for
+  state/commands.
 - The MQTT connection could integrate with HA's MQTT support, but the mutual TLS with device-specific certs is non-standard
 - Cert provisioning (fetch_certs.py) would need to become a config flow
-- Need to decide: custom component vs. add-on vs. both
-- Audio should work through HA's WebRTC camera support if we can bridge correctly
+- Packaged add-on/config-flow certificate provisioning remains future work.
+- Sleep analytics entities remain future work.
 
 ## Tools Required
 

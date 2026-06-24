@@ -18,6 +18,7 @@ class CommandUnavailable(RuntimeError):
 PublishDesired = Callable[[dict[str, Any]], dict[str, Any]]
 
 VOLUME_PROFILES = {"gentle", "normal", "max"}
+CRY_SENSITIVITY_VALUES = {0, 1, 2, 4, 6}
 
 
 def _bool(value: Any) -> bool:
@@ -51,6 +52,13 @@ def _profile(value: Any) -> str:
     return normalized
 
 
+def _cry_sensitivity(value: Any) -> int:
+    raw = _int_between(value, 0, 6)
+    if raw not in CRY_SENSITIVITY_VALUES:
+        raise CommandError("value must be one of 0, 1, 2, 4, or 6")
+    return raw
+
+
 def build_desired(command: str, value: Any) -> dict[str, Any]:
     """Build an Android-app-compatible desired shadow fragment."""
     if command == "actuator_on":
@@ -73,6 +81,10 @@ def build_desired(command: str, value: Any) -> dict[str, Any]:
         return {"actuator": {"bounceAlwaysOn": _bool(value)}}
     if command == "always_on_bounce_intensity":
         return {"actuator": {"bounceAlwaysOnIntensity": _int_between(value, 0, 100)}}
+    if command == "tap_detection_enabled":
+        return {"actuator": {"tapDetectionEnable": _bool(value)}}
+    if command == "push_gesture_enabled":
+        return {"actuator": {"pushGestureEnable": _bool(value)}}
     if command == "bounce_level":
         return {"bounceLevel": _int_between(value, 0, 5)}
     if command == "music_playing":
@@ -91,8 +103,34 @@ def build_desired(command: str, value: Any) -> dict[str, Any]:
         return {"light": {"indicatorBrightnessMode": _mode(value)}}
     if command == "keep_music_on_during_sleep":
         return {"keepMusicOnDuringSleep": _bool(value)}
+    if command == "keep_music_on_during_sleep_level":
+        return {"keepMusicOnDuringSleepLevel": _int_between(value, 0, 5)}
     if command == "keep_bounce_on_during_sleep":
         return {"keepBounceOnDuringSleep": _bool(value)}
+    if command == "keep_bounce_on_during_sleep_level":
+        return {"keepBounceOnDuringSleepLevel": _int_between(value, 0, 5)}
+    if command == "auto_mode_lock_on":
+        return {"autoModeLockOn": _bool(value)}
+    if command == "auto_mode_lock_duration":
+        return {"autoModeLockDuration": _int_between(value, 0, 1440)}
+    if command == "music_duration":
+        return {"musicDuration": _int_between(value, 0, 1440)}
+    if command == "max_bounce_limit":
+        return {"maxBounceLimit": _int_between(value, 0, 100)}
+    if command == "max_volume_limit":
+        return {"maxVolumeLimit": _int_between(value, 0, 100)}
+    if command == "start_recipe_enabled":
+        return {"startRecipeEnabled": _bool(value)}
+    if command == "start_recipe_music_level":
+        return {"startRecipeMusicLevel": _int_between(value, 0, 5)}
+    if command == "start_recipe_bounce_level":
+        return {"startRecipeBounceLevel": _int_between(value, 0, 5)}
+    if command == "start_recipe_lock_duration":
+        return {"startRecipeLockDuration": _int_between(value, 0, 1440)}
+    if command == "adaptive_soothing_enabled":
+        return {"control": {"adaptiveSoothingEnabled": _bool(value)}}
+    if command == "cry_sensitivity":
+        return {"control": {"crySensitivity": _cry_sensitivity(value)}}
 
     raise CommandError(f"unsupported command: {command}")
 

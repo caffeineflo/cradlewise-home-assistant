@@ -19,6 +19,14 @@ from .status_helpers import path_value
 MODE_OPTIONS = ("Auto", "Manual")
 MODE_VALUES = {"Auto": 0, "Manual": 1}
 PROFILE_OPTIONS = ("gentle", "normal", "max")
+CRY_SENSITIVITY_OPTIONS = ("Minimum", "Low", "Moderate", "High", "Maximum")
+CRY_SENSITIVITY_VALUES = {
+    "Minimum": 0,
+    "Low": 1,
+    "Moderate": 2,
+    "High": 4,
+    "Maximum": 6,
+}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -54,6 +62,22 @@ SELECTS: tuple[CradlewiseSelectDescription, ...] = (
         command="volume_profile",
         options=PROFILE_OPTIONS,
         values={profile: profile for profile in PROFILE_OPTIONS},
+    ),
+    CradlewiseSelectDescription(
+        key="light_indicator_mode",
+        name="Indicator Brightness Mode",
+        path=("device_state", "light_indicator_brightness_mode"),
+        command="light_indicator_mode",
+        options=MODE_OPTIONS,
+        values=MODE_VALUES,
+    ),
+    CradlewiseSelectDescription(
+        key="cry_sensitivity",
+        name="Cry Sensitivity",
+        path=("device_state", "control_cry_sensitivity"),
+        command="cry_sensitivity",
+        options=CRY_SENSITIVITY_OPTIONS,
+        values=CRY_SENSITIVITY_VALUES,
     ),
 )
 
@@ -103,12 +127,13 @@ class CradlewiseBridgeSelect(CoordinatorEntity, SelectEntity):
             return None
 
         normalized = str(value).lower()
-        if normalized in {"0", "auto"}:
-            return "Auto"
-        if normalized in {"1", "manual"}:
-            return "Manual"
-        if normalized in PROFILE_OPTIONS:
-            return normalized
+        for option, option_value in self.entity_description.values.items():
+            if value == option_value:
+                return option
+            if normalized == str(option_value).lower():
+                return option
+            if normalized == option.lower():
+                return option
         return None
 
     async def async_select_option(self, option: str) -> None:
