@@ -190,6 +190,9 @@ def main() -> None:
         pass
     except KeyboardInterrupt:
         pass
+    except Exception:
+        logging.exception("Fatal bridge error; exiting process for supervisor restart")
+        os._exit(1)
     finally:
         loop.close()
 
