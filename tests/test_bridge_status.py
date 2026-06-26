@@ -503,6 +503,42 @@ def test_status_store_maps_live_cloud_state_shape():
     assert device_state["restart_ggc_requested"] is False
 
 
+def test_status_store_defaults_omitted_inactive_flags_from_live_shadow():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    store.update_device_state(
+        {
+            "rawShadow": {
+                "bluetooth": {
+                    "wifiStats": json.dumps(
+                        {
+                            "activeConnection": {"ssid": "Nursery-IoT"},
+                            "rssi0": -50,
+                            "strength": 77,
+                        }
+                    )
+                },
+                "light": {"indicatorBrightness": 0},
+            }
+        },
+        source="cloud",
+    )
+
+    device_state = store.snapshot()["device_state"]
+
+    assert device_state["crib_helping"] is False
+    assert device_state["inside_sleep_schedule"] is False
+    assert device_state["inside_soothing_window"] is False
+    assert device_state["rocking_not_effective"] is False
+    assert device_state["light_on"] is False
+    assert device_state["volume_profile"] == "normal"
+    assert device_state["wifi_stats_ssid"] == "Nursery-IoT"
+    assert device_state["wifi_stats_bitrate"] is None
+
+    assert store.snapshot()["cradle_state"]["wifi_ssid"] == "Nursery-IoT"
+    assert store.snapshot()["cradle_state"]["wifi_strength"] == -50
+    assert store.snapshot()["cradle_state"]["local_ip"] == "192.0.2.10"
+
+
 @pytest.mark.parametrize(
     ("raw_phase", "expected_phase"),
     [

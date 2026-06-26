@@ -153,6 +153,25 @@ def _first_value_or_default(
     return default if value is None else value
 
 
+def _bool_or_none(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return value != 0
+    if isinstance(value, str):
+        cleaned = value.strip().lower()
+        if cleaned in {"1", "true", "yes", "on"}:
+            return True
+        if cleaned in {"0", "false", "no", "off"}:
+            return False
+    return None
+
+
+def _bool_from_optional_or_default(value: Any, default: bool) -> bool:
+    parsed = _bool_or_none(value)
+    return default if parsed is None else parsed
+
+
 def _int_or_none(value: Any) -> int | None:
     if value is None:
         return None
@@ -201,6 +220,27 @@ def _wifi_stat(payload: dict[str, Any] | None, key: str) -> Any:
     if stats is None:
         return None
     return stats.get(key)
+
+
+def _wifi_stat_path(payload: dict[str, Any] | None, *path: str) -> Any:
+    stats = _json_dict_or_none(
+        _first_value(
+            payload,
+            ("bluetooth", "wifiStats"),
+            ("rawShadow", "bluetooth", "wifiStats"),
+        )
+    )
+    if stats is None:
+        return None
+    return _nested(stats, *path)
+
+
+def _wifi_stat_first(payload: dict[str, Any] | None, *paths: tuple[str, ...]) -> Any:
+    for path in paths:
+        value = _wifi_stat_path(payload, *path)
+        if value is not None:
+            return value
+    return None
 
 
 def _device_state_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -348,8 +388,11 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("babyNeedsHelp",),
             ("rawShadow", "babyNeedsHelp"),
         ),
-        "crib_helping": _first_value(
-            state, ("isCribHelping",), ("rawShadow", "isCribHelping")
+        "crib_helping": _first_value_or_default(
+            state,
+            False,
+            ("isCribHelping",),
+            ("rawShadow", "isCribHelping"),
         ),
         "loud_sound_detected": _first_value_or_default(
             state,
@@ -357,14 +400,23 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("loudSoundDetected",),
             ("rawShadow", "loudSoundDetected"),
         ),
-        "inside_sleep_schedule": _first_value(
-            state, ("insideSleepSchedule",), ("rawShadow", "insideSleepSchedule")
+        "inside_sleep_schedule": _first_value_or_default(
+            state,
+            False,
+            ("insideSleepSchedule",),
+            ("rawShadow", "insideSleepSchedule"),
         ),
-        "inside_soothing_window": _first_value(
-            state, ("insideSoothingWindow",), ("rawShadow", "insideSoothingWindow")
+        "inside_soothing_window": _first_value_or_default(
+            state,
+            False,
+            ("insideSoothingWindow",),
+            ("rawShadow", "insideSoothingWindow"),
         ),
-        "rocking_not_effective": _first_value(
-            state, ("rockingNotEffective",), ("rawShadow", "rockingNotEffective")
+        "rocking_not_effective": _first_value_or_default(
+            state,
+            False,
+            ("rockingNotEffective",),
+            ("rawShadow", "rockingNotEffective"),
         ),
         "reported_state": _int_or_none(
             _first_value(state, ("state",), ("rawShadow", "state"))
@@ -565,8 +617,11 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("soundSynth", "trackName"),
             ("rawShadow", "soundSynth", "trackName"),
         ),
-        "volume_profile": _first_value(
-            state, ("volumeProfile",), ("rawShadow", "volumeProfile")
+        "volume_profile": _first_value_or_default(
+            state,
+            "normal",
+            ("volumeProfile",),
+            ("rawShadow", "volumeProfile"),
         ),
         "sound_ambience": _mapped_int_name(
             _first_value(state, ("soundSynth", "ambience"), ("rawShadow", "soundSynth", "ambience")),
@@ -649,8 +704,11 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
                 state, ("musicTimeRemaining",), ("rawShadow", "musicTimeRemaining")
             )
         ),
-        "light_on": _first_value(
-            state, ("light", "lightOn"), ("rawShadow", "light", "lightOn")
+        "light_on": _bool_from_optional_or_default(
+            _first_value(
+                state, ("light", "lightOn"), ("rawShadow", "light", "lightOn")
+            ),
+            bool(light_intensity),
         ),
         "light_intensity": light_intensity,
         "light_indicator_brightness_mode": _first_value(
@@ -728,9 +786,15 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
         "wifi_stats_rssi1": _int_or_none(_wifi_stat(state, "rssi1")),
         "wifi_stats_noise": _int_or_none(_wifi_stat(state, "noise")),
         "wifi_stats_bitrate": _int_or_none(_wifi_stat(state, "bitrate")),
-        "wifi_stats_ssid": _wifi_stat(state, "ssid"),
+        "wifi_stats_ssid": _wifi_stat_first(
+            state,
+            ("ssid",),
+            ("activeConnection", "ssid"),
+        ),
         "wifi_stats_arp_success_count": _int_or_none(_wifi_stat(state, "ARPSuccessCount")),
-        "wifi_stats_beacon_loss_count": _int_or_none(_wifi_stat(state, "BeaconLossCount")),
+        "wifi_stats_beacon_loss_count": _int_or_none(
+            _wifi_stat_first(state, ("BeaconLossCount",), ("beaconLossCount",))
+        ),
         "software_version": _first_value(
             state, ("meta", "software_version"), ("rawShadow", "meta", "software_version")
         ),
@@ -1072,6 +1136,8 @@ class BridgeStatusStore:
                 and _now() - self._last_video_frame_at < 30
             )
             healthy = self._mqtt_connected and self._video_frames > 0 and recent_video
+            device_snapshot = _device_state_snapshot(device_state or cradle_state)
+
             return {
                 "bridge": {
                     "cradle_id": self.cradle_id,
@@ -1107,25 +1173,28 @@ class BridgeStatusStore:
                     ),
                     "op_mode": _nested(cradle_state, "state", "info", "opMode"),
                     "status": _nested(cradle_state, "state", "info", "status"),
-                    "wifi_ssid": _nested(
-                        cradle_state, "info", "connectivity", "ssid"
-                    ),
-                    "wifi_strength": _nested(
-                        cradle_state, "info", "connectivity", "strength"
-                    ),
+                    "wifi_ssid": _first_value(
+                        cradle_state,
+                        ("info", "connectivity", "ssid"),
+                    )
+                    or device_snapshot["wifi_stats_ssid"],
+                    "wifi_strength": _first_value(
+                        cradle_state,
+                        ("info", "connectivity", "strength"),
+                    )
+                    or device_snapshot["wifi_stats_rssi0"],
                     "wifi_frequency": _nested(
                         cradle_state, "info", "connectivity", "frequency"
                     ),
-                    "local_ip": _nested(
-                        cradle_state, "info", "connectivity", "localIP"
-                    ),
+                    "local_ip": _nested(cradle_state, "info", "connectivity", "localIP")
+                    or self.crib_ip,
                 },
                 "beacon": {
                     "raw": beacon,
                     "updated_at": self._last_beacon_at,
                 },
                 "device_state": {
-                    **_device_state_snapshot(device_state or cradle_state),
+                    **device_snapshot,
                     "updated_at": self._last_device_state_at,
                     "source": self._last_device_state_source,
                 },
