@@ -372,6 +372,9 @@ def test_status_store_maps_live_cloud_state_shape():
     assert device_state["sleep_phase_duration_start_time"] == "2026-06-24 01:08:31.968945"
     assert device_state["sleep_phase_present_toggle_time"] == "2026-06-24 01:08:20.242141"
     assert device_state["baby_presence_being_determined"] is False
+    assert device_state["baby_needs_attention"] is False
+    assert device_state["baby_needs_help"] is False
+    assert device_state["loud_sound_detected"] is False
     assert device_state["bouncing"] is False
     assert device_state["bounce_setting"] == 2
     assert device_state["bounce_level"] == 4

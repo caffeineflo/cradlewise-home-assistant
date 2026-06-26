@@ -144,6 +144,15 @@ def _first_value(payload: dict[str, Any] | None, *paths: tuple[str, ...]) -> Any
     return None
 
 
+def _first_value_or_default(
+    payload: dict[str, Any] | None,
+    default: Any,
+    *paths: tuple[str, ...],
+) -> Any:
+    value = _first_value(payload, *paths)
+    return default if value is None else value
+
+
 def _int_or_none(value: Any) -> int | None:
     if value is None:
         return None
@@ -327,17 +336,26 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("babyPresenceBeingDetermined",),
             ("rawShadow", "babyPresenceBeingDetermined"),
         ),
-        "baby_needs_attention": _first_value(
-            state, ("babyNeedsAttention",), ("rawShadow", "babyNeedsAttention")
+        "baby_needs_attention": _first_value_or_default(
+            state,
+            False,
+            ("babyNeedsAttention",),
+            ("rawShadow", "babyNeedsAttention"),
         ),
-        "baby_needs_help": _first_value(
-            state, ("babyNeedsHelp",), ("rawShadow", "babyNeedsHelp")
+        "baby_needs_help": _first_value_or_default(
+            state,
+            False,
+            ("babyNeedsHelp",),
+            ("rawShadow", "babyNeedsHelp"),
         ),
         "crib_helping": _first_value(
             state, ("isCribHelping",), ("rawShadow", "isCribHelping")
         ),
-        "loud_sound_detected": _first_value(
-            state, ("loudSoundDetected",), ("rawShadow", "loudSoundDetected")
+        "loud_sound_detected": _first_value_or_default(
+            state,
+            False,
+            ("loudSoundDetected",),
+            ("rawShadow", "loudSoundDetected"),
         ),
         "inside_sleep_schedule": _first_value(
             state, ("insideSleepSchedule",), ("rawShadow", "insideSleepSchedule")
