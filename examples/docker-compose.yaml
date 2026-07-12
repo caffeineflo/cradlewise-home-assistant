@@ -1,3 +1,5 @@
+# Development/trusted-LAN example. A production Traefik deployment should
+# omit both ports blocks and use the private cradlewise-proxy network instead.
 services:
   cradlewise-mediamtx:
     image: bluenviron/mediamtx:1.19.2@sha256:f37aaaf1a707c42b0aff49a3ab5d4fa57a3504ebc3f27657434a820e3b16d730

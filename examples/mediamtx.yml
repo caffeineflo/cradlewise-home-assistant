@@ -1,4 +1,5 @@
 authMethod: internal
+rtspTransports: [tcp]
 
 rtmp: false
 hls: false

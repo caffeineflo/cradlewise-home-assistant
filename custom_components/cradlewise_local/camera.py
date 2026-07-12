@@ -7,7 +7,9 @@ import logging
 import aiohttp
 from haffmpeg.tools import IMAGE_JPEG
 from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.components.camera.prefs import get_dynamic_camera_stream_settings
 from homeassistant.components.ffmpeg import async_get_image
+from homeassistant.components.stream import HLS_PROVIDER
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -83,6 +85,29 @@ class CradlewiseBridgeCamera(Camera):
             self.async_on_remove(
                 self._coordinator.async_add_listener(self.async_write_ha_state)
             )
+        stream_settings = await get_dynamic_camera_stream_settings(
+            self.hass, self.entity_id
+        )
+        if stream_settings.preload_stream:
+            stream = await self.async_create_stream()
+            if stream is not None:
+                stream.add_provider(HLS_PROVIDER)
+                await stream.start()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Stop a preloaded stream before the camera entity is replaced."""
+        try:
+            if self.stream is not None:
+                stream_settings = self.stream.dynamic_stream_settings
+                preload_stream = stream_settings.preload_stream
+                stream_settings.preload_stream = False
+                try:
+                    await self.stream.stop()
+                finally:
+                    stream_settings.preload_stream = preload_stream
+        finally:
+            self.stream = None
+            await super().async_will_remove_from_hass()
 
     async def stream_source(self) -> str | None:
         """Return the raw stream URL for HA's stream component."""

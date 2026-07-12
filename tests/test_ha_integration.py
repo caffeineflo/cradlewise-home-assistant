@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import time
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 try:
     from homeassistant import config_entries, data_entry_flow
+    from homeassistant.components.camera import Camera
+    from homeassistant.components.camera.const import DATA_CAMERA_PREFS
+    from homeassistant.components.stream import HLS_PROVIDER
     from homeassistant.config_entries import ConfigEntryState
     from homeassistant.const import CONF_NAME, STATE_UNAVAILABLE
     from homeassistant.core import HomeAssistant
@@ -21,6 +26,7 @@ except ModuleNotFoundError:
     )
 
 from custom_components.cradlewise_local import async_migrate_entry
+from custom_components.cradlewise_local.camera import CradlewiseBridgeCamera
 from custom_components.cradlewise_local.const import (
     CONF_BEARER_TOKEN,
     CONF_BRIDGE_STATUS_URL,
@@ -285,6 +291,98 @@ async def test_setup_and_unload_with_bridge_http(
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+async def test_reload_replaces_and_restarts_preloaded_camera_stream(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = await _setup_entry(hass, aioclient_mock)
+    registry_entry = next(
+        registry_entry
+        for registry_entry in _registry_entries(hass, entry)
+        if registry_entry.unique_id == f"{CRADLE_ID}_camera"
+    )
+    old_camera = hass.data["camera"].get_entity(registry_entry.entity_id)
+    stream_settings = await hass.data[DATA_CAMERA_PREFS].get_dynamic_stream_settings(
+        registry_entry.entity_id
+    )
+    await hass.data[DATA_CAMERA_PREFS].async_update(
+        registry_entry.entity_id, preload_stream=True
+    )
+    old_stop = AsyncMock()
+    old_camera.stream = SimpleNamespace(
+        dynamic_stream_settings=stream_settings,
+        stop=old_stop,
+    )
+    replacement_stream = SimpleNamespace(
+        dynamic_stream_settings=stream_settings,
+        add_provider=Mock(),
+        start=AsyncMock(),
+    )
+
+    async def create_replacement_stream(camera):
+        camera.stream = replacement_stream
+        return replacement_stream
+
+    monkeypatch.setattr(
+        CradlewiseBridgeCamera,
+        "async_create_stream",
+        create_replacement_stream,
+    )
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    replacement_camera = hass.data["camera"].get_entity(registry_entry.entity_id)
+
+    assert (
+        old_stop.await_count,
+        stream_settings.preload_stream,
+        replacement_camera is old_camera,
+        replacement_stream.add_provider.call_args.args,
+        replacement_stream.start.await_count,
+    ) == (
+        1,
+        True,
+        False,
+        (HLS_PROVIDER,),
+        1,
+    )
+
+
+async def test_stream_stop_error_still_cleans_up_camera(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = await _setup_entry(hass, aioclient_mock)
+    registry_entry = next(
+        registry_entry
+        for registry_entry in _registry_entries(hass, entry)
+        if registry_entry.unique_id == f"{CRADLE_ID}_camera"
+    )
+    camera = hass.data["camera"].get_entity(registry_entry.entity_id)
+    stream_settings = SimpleNamespace(preload_stream=True)
+    camera.stream = SimpleNamespace(
+        dynamic_stream_settings=stream_settings,
+        stop=AsyncMock(side_effect=RuntimeError("stop failed")),
+    )
+    parent_cleanup_calls = []
+
+    async def parent_cleanup(parent_camera):
+        parent_cleanup_calls.append(parent_camera)
+
+    monkeypatch.setattr(Camera, "async_will_remove_from_hass", parent_cleanup)
+
+    with pytest.raises(RuntimeError, match="stop failed"):
+        await camera.async_will_remove_from_hass()
+
+    assert (
+        camera.stream,
+        stream_settings.preload_stream,
+        parent_cleanup_calls,
+    ) == (None, True, [camera])
 
 
 async def test_entity_registry_defaults_match_policy_counts(

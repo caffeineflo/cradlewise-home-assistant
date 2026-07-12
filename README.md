@@ -62,8 +62,9 @@ The integration asks for:
 
 - Cradle ID
 - Authenticated RTSP stream URL, for example
-  `rtsp://cradlewise-reader:<password>@192.0.2.20:8560/cradlewise`
-- Optional bridge status URL, for example `http://192.0.2.20:8088/state`
+  `rtsps://cradlewise-reader:<password>@cradlewise-rtsp.example.com:443/cradlewise`
+- Optional bridge status URL, for example
+  `https://cradlewise-api.example.com/state`
 - Optional snapshot URL if you expose snapshots separately
 - Bridge bearer token matching `CRADLEWISE_STATUS_TOKEN`
 
@@ -117,7 +118,15 @@ Cloud credentials are optional:
 cp .env.example .env
 ```
 
-Run the example bridge stack:
+For the optional cloud fallback, direct `CRADLEWISE_EMAIL` and
+`CRADLEWISE_PASSWORD` values remain supported. A container secret or other
+mounted file can instead be supplied with `CRADLEWISE_EMAIL_FILE` and
+`CRADLEWISE_PASSWORD_FILE`. Do not configure a non-empty direct value together
+with its corresponding `_FILE` variable. File paths are resolved inside the
+bridge process, so container deployments must mount them read-only at the
+configured paths.
+
+Run the development/trusted-LAN example bridge stack:
 
 ```bash
 docker compose --env-file .env -f examples/docker-compose.yaml up -d --build
@@ -128,6 +137,22 @@ The example exposes:
 - RTSP: `rtsp://<reader>:<password>@<host>:8560/cradlewise`
 - Authenticated bridge state: `http://<host>:8088/state`
 - Bridge health: `http://<host>:8088/health`
+
+These direct plaintext ports are for development or a trusted LAN. The verified
+site-specific production configuration lives with the host's existing Traefik
+stack rather than in this repository and publishes neither `8088` nor `8560`.
+The bridge, MediaMTX, and Traefik join the external private Docker network named
+`cradlewise-proxy`. Traefik uses its existing `https` entrypoint on port 443: an
+HTTP `Host("cradlewise-api.example.com")` router terminates HTTPS to bridge port
+8080, while a TCP `HostSNI("cradlewise-rtsp.example.com")` router terminates
+RTSPS to MediaMTX port 8554. Plain RTSP remains inside Docker between the
+bridge, MediaMTX, and Traefik.
+
+Reconfigure the existing Home Assistant config entry with the HTTPS and RTSPS
+URLs. Update the existing Scrypted Rebroadcast/Prebuffer device's source URL in
+place. Do not delete and recreate either integration/device; keeping the same
+HA entry, Scrypted device, and HomeKit accessory preserves downstream identity
+and client metadata.
 
 `/health` is intentionally unauthenticated for container health checks. With
 `CRADLEWISE_STATUS_TOKEN` configured, the state, snapshot, and command

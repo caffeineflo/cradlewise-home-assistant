@@ -68,8 +68,21 @@ CRADLEWISE_PASSWORD=...
 CRADLEWISE_STATE_POLL_INTERVAL=30
 ```
 
-Equivalent CLI flags exist for local development, but environment variables are
-preferred for services so the password does not appear in process listings.
+For file-backed secrets, leave the direct values unset or empty and configure:
+
+```bash
+CRADLEWISE_EMAIL_FILE=/run/secrets/cradlewise_email
+CRADLEWISE_PASSWORD_FILE=/run/secrets/cradlewise_password
+```
+
+Do not set a non-empty direct value and its corresponding `_FILE` variable at
+the same time. The bridge fails startup when both are configured, or when a
+configured file is missing, unreadable, invalid UTF-8, or blank. File paths are
+resolved inside the bridge process; mount them read-only into the container.
+Only trailing CR/LF characters are removed from file contents.
+
+Direct-value CLI flags exist for local development, but environment variables
+are preferred for services so the password does not appear in process listings.
 
 Do not add cloud credentials unless a field you need is unavailable locally.
 The bridge keeps local and cloud documents separate, merges partial updates,
@@ -80,9 +93,10 @@ shadow response topics.
 
 ## MediaMTX Sidecar
 
-The example stack in `examples/docker-compose.yaml` pins MediaMTX 1.19.2 by
-digest as `cradlewise-mediamtx` and maps host port `8560` to container RTSP
-port `8554`. It uses separate path-scoped publisher and reader credentials.
+The development/trusted-LAN stack in `examples/docker-compose.yaml` pins
+MediaMTX 1.19.2 by digest as `cradlewise-mediamtx` and maps host port `8560` to
+container RTSP port `8554`. It uses separate path-scoped publisher and reader
+credentials and forces RTSP over TCP.
 
 The bridge itself runs as `cradlewise-bridge` in the same stack. Only the
 selected cradle's certificate directory is mounted read-only:
@@ -109,14 +123,47 @@ bridge runs as an unprivileged user and receives a bounded `/tmp` tmpfs. The
 MediaMTX image is pinned by version and digest, and its publisher and reader
 accounts have separate permissions for the `cradlewise` path.
 
-The HTTP API is intended for a trusted LAN. `/health` is unauthenticated so
-Docker can probe it and returns 200 only while MQTT, WebRTC/video freshness,
-and the active RTSP sink are healthy; it returns 503 otherwise. When a bearer
-token is configured, `/state`, `/snapshot.jpg`, and `/command` require it.
-Stale snapshots are rejected, and commands are unavailable when no bearer
-token is configured. The example does not provide TLS, so use a firewall or an
-authenticated TLS proxy before exposing either service outside the trusted
-network.
+The base Compose example publishes plaintext ports `8088` and `8560` and is
+only for development or a trusted LAN. `/health` is unauthenticated so Docker
+can probe it and returns 200 only while MQTT, WebRTC/video freshness, and the
+active RTSP sink are healthy; it returns 503 otherwise. When a bearer token is
+configured, `/state`, `/snapshot.jpg`, and `/command` require it. Stale
+snapshots are rejected, and commands are unavailable when no bearer token is
+configured.
+
+### Verified Production TLS Topology
+
+The site-specific production Compose configuration lives with the host's
+existing Traefik stack rather than in this repository. It uses Traefik's
+`https` entrypoint on port 443 for both protocols:
+
+- An HTTP router with `Host("cradlewise-api.example.com")` terminates HTTPS and
+  forwards to `cradlewise-bridge:8080`.
+- A TCP router with `HostSNI("cradlewise-rtsp.example.com")` terminates RTSPS
+  and forwards to `cradlewise-mediamtx:8554`.
+
+Traefik, `cradlewise-bridge`, and `cradlewise-mediamtx` share the external
+private Docker network named exactly `cradlewise-proxy`; set
+`traefik.docker.network=cradlewise-proxy` on both routed services. The
+site-specific Compose file omits both `ports` blocks, so host ports `8088` and
+`8560` are not published. The bridge still publishes plain RTSP to MediaMTX by
+service name, and Traefik forwards plain RTSP after TLS termination, but those
+connections remain inside Docker. Keep the API bearer token, MediaMTX reader
+credentials, and the existing Traefik local-only HTTP middleware in place. The
+runnable repository example remains the plaintext development/trusted-LAN
+stack described above.
+
+Use these client URLs:
+
+```text
+https://cradlewise-api.example.com/state
+rtsps://cradlewise-reader:<password>@cradlewise-rtsp.example.com:443/cradlewise
+```
+
+Reconfigure the existing Home Assistant config entry with those URLs and
+update the existing Scrypted Rebroadcast/Prebuffer source URL in place. Do not
+delete/re-add the HA entry or Scrypted device; retaining them preserves the
+existing entity, Scrypted, and HomeKit accessory identities.
 
 ## Home Assistant Component
 
@@ -126,7 +173,7 @@ directory, restart HA, then add "Cradlewise Local" from Devices & Services.
 For the stream URL, use the RTSP reader credential:
 
 ```text
-rtsp://cradlewise-reader:<password>@192.0.2.20:8560/cradlewise
+rtsps://cradlewise-reader:<password>@cradlewise-rtsp.example.com:443/cradlewise
 ```
 
 If using Home Assistant's YAML `ffmpeg` camera platform directly, force RTSP
@@ -136,7 +183,7 @@ smoke testing:
 ```yaml
 - platform: ffmpeg
   name: Cradlewise Local
-  input: -rtsp_transport tcp -i rtsp://cradlewise-reader:<password>@192.0.2.20:8560/cradlewise
+  input: -rtsp_transport tcp -i rtsps://cradlewise-reader:<password>@cradlewise-rtsp.example.com:443/cradlewise
 ```
 
 The custom component gives HA a normal camera entity through `stream_source()`

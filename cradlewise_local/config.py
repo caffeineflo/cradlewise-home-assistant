@@ -11,6 +11,44 @@ class BridgeConfigError(ValueError):
     """Raised when bridge configuration is invalid."""
 
 
+def resolve_secret_value(
+    *,
+    direct_value: str | None,
+    file_path: str | None,
+    direct_name: str,
+    file_name: str,
+) -> str | None:
+    """Resolve an optional direct or file-backed secret value."""
+    direct_is_set = direct_value is not None and bool(direct_value.strip())
+
+    if direct_is_set and file_path is not None:
+        raise BridgeConfigError(
+            f"{direct_name} and {file_name} cannot both be configured"
+        )
+
+    if file_path is None:
+        return direct_value if direct_is_set else None
+
+    if not file_path.strip():
+        raise BridgeConfigError(f"{file_name} must not be blank")
+
+    path = Path(file_path)
+    try:
+        value = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise BridgeConfigError(f"{file_name} file is not valid UTF-8: {path}") from exc
+    except OSError as exc:
+        detail = exc.strerror or str(exc)
+        raise BridgeConfigError(
+            f"could not read {file_name} file {path}: {detail}"
+        ) from exc
+
+    value = value.rstrip("\r\n")
+    if not value.strip():
+        raise BridgeConfigError(f"{file_name} file is blank: {path}")
+    return value
+
+
 @dataclass(frozen=True)
 class BridgeConfig:
     """Runtime settings for a single Cradlewise bridge stream."""

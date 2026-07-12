@@ -11,7 +11,7 @@ import time
 
 from .cloud_state import poll_cloud_state
 from .commands import BridgeCommandHandler
-from .config import BridgeConfig, BridgeConfigError
+from .config import BridgeConfig, BridgeConfigError, resolve_secret_value
 from .sinks import FfmpegRtspSink
 from .status import BridgeStatusHttpServer, BridgeStatusStore
 from .streamer import run_bridge
@@ -68,6 +68,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("CRADLEWISE_PASSWORD"),
         help="Cradlewise account password for optional cloud state polling",
     )
+    parser.set_defaults(
+        cloud_email_file=os.environ.get("CRADLEWISE_EMAIL_FILE"),
+        cloud_password_file=os.environ.get("CRADLEWISE_PASSWORD_FILE"),
+    )
     parser.add_argument(
         "--cloud-state-poll-interval",
         type=int,
@@ -93,6 +97,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     return parser
+
+
+def resolve_cloud_credentials(args: argparse.Namespace) -> None:
+    """Resolve direct or file-backed cloud credentials into CLI arguments."""
+    args.cloud_email = resolve_secret_value(
+        direct_value=args.cloud_email,
+        file_path=args.cloud_email_file,
+        direct_name="CRADLEWISE_EMAIL",
+        file_name="CRADLEWISE_EMAIL_FILE",
+    )
+    args.cloud_password = resolve_secret_value(
+        direct_value=args.cloud_password,
+        file_path=args.cloud_password_file,
+        direct_name="CRADLEWISE_PASSWORD",
+        file_name="CRADLEWISE_PASSWORD_FILE",
+    )
 
 
 async def monitor_media_freshness(
@@ -214,6 +234,10 @@ async def async_main(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    try:
+        resolve_cloud_credentials(args)
+    except BridgeConfigError as exc:
+        parser.error(str(exc))
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
