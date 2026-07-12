@@ -37,6 +37,30 @@ def test_status_store_tracks_media_and_connection_state():
     assert snapshot["media"]["resolution"] == "1280x720"
 
 
+def test_status_store_marks_bridge_unhealthy_when_sink_stops_writing(monkeypatch):
+    now = 1000.0
+    monkeypatch.setattr("cradlewise_local.status._now", lambda: now)
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    store.set_mqtt_connected(True)
+    store.increment_video_frames()
+    store.update_sink_health(
+        {
+            "started": True,
+            "healthy": True,
+            "error": None,
+            "last_video_write_at": now,
+            "last_audio_write_at": None,
+        }
+    )
+
+    now = 1031.0
+    snapshot = store.snapshot()
+
+    assert snapshot["sink"]["process_healthy"] is True
+    assert snapshot["sink"]["healthy"] is False
+    assert snapshot["bridge"]["healthy"] is False
+
+
 def test_status_store_caches_latest_snapshot_jpeg():
     store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
     jpeg = b"\xff\xd8frame\xff\xd9"
@@ -45,6 +69,81 @@ def test_status_store_caches_latest_snapshot_jpeg():
 
     assert store.snapshot_jpeg() == jpeg
     assert store.snapshot()["media"]["last_snapshot_at"] is not None
+
+
+def test_status_store_has_no_false_defaults_before_first_device_state():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+
+    device_state = store.snapshot()["device_state"]
+
+    assert device_state["baby_needs_attention"] is None
+    assert device_state["light_on"] is None
+    assert device_state["volume_profile"] is None
+    assert device_state["available"] is False
+
+
+def test_status_store_merges_partial_updates_per_source():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    store.update_device_state(
+        {"babyPresent": True, "actuator": {"duration": 15}}, source="cloud"
+    )
+    store.update_device_state(
+        {"state": {"reported": {"actuator": {"on": True}}}},
+        source="local_shadow",
+    )
+    store.update_device_state(
+        {"state": {"reported": {"actuator": {"amplitude": 4}}}},
+        source="local_shadow",
+    )
+
+    device_state = store.snapshot()["device_state"]
+
+    assert device_state["baby_present"] is True
+    assert device_state["bounce_duration"] == 15
+    assert device_state["bouncing"] is True
+    assert device_state["bounce_amplitude"] == 4
+    assert device_state["source"] == "local_shadow"
+    assert set(device_state["sources"]) == {"cloud", "local_shadow"}
+
+
+def test_status_store_marks_source_state_stale(monkeypatch):
+    now = 1000.0
+    monkeypatch.setattr("cradlewise_local.status._now", lambda: now)
+    store = BridgeStatusStore(
+        cradle_id="cradle-1",
+        crib_ip="192.0.2.10",
+        cloud_state_stale_after=1,
+    )
+    store.update_device_state({"babyPresent": True}, source="cloud")
+
+    now = 1002.0
+    device_state = store.snapshot()["device_state"]
+
+    assert device_state["baby_present"] is True
+    assert device_state["available"] is False
+    assert device_state["stale"] is True
+    assert device_state["sources"]["cloud"]["stale"] is True
+
+
+def test_status_store_does_not_treat_numeric_sentinel_as_true():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    store.update_device_state({"babyPresent": -1, "bounceLevel": True}, source="cloud")
+
+    device_state = store.snapshot()["device_state"]
+
+    assert device_state["baby_present"] is None
+    assert device_state["bounce_level"] is None
+
+
+def test_status_store_reports_source_error_before_first_state():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    store.mark_device_state_error("cloud", "request timed out")
+
+    device_state = store.snapshot()["device_state"]
+
+    assert device_state["available"] is False
+    assert device_state["sources"]["cloud"]["stale"] is True
+    assert device_state["sources"]["cloud"]["error"] == "request timed out"
 
 
 def test_status_http_server_serves_cached_snapshot_jpeg():
@@ -73,6 +172,75 @@ def test_status_http_server_serves_cached_snapshot_jpeg():
             assert response.read() == b"\xff\xd8frame\xff\xd9"
     finally:
         server.close()
+
+
+def test_status_http_server_requires_bearer_token_for_state():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    server = BridgeStatusHttpServer(
+        store, "127.0.0.1", _free_port(), bearer_token="secret"
+    )
+    server.start()
+
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(f"http://127.0.0.1:{server.port}/state", timeout=2)
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.port}/state",
+            headers={"Authorization": "Bearer secret"},
+        )
+        with urllib.request.urlopen(request, timeout=2) as response:
+            assert response.status == 200
+    finally:
+        server.close()
+
+    assert exc_info.value.code == 401
+
+
+def test_health_is_unauthenticated_and_returns_503_until_healthy():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    server = BridgeStatusHttpServer(
+        store, "127.0.0.1", _free_port(), bearer_token="secret"
+    )
+    server.start()
+
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(f"http://127.0.0.1:{server.port}/health", timeout=2)
+        store.set_mqtt_connected(True)
+        store.increment_video_frames()
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{server.port}/health", timeout=2
+        ) as response:
+            assert response.status == 200
+    finally:
+        server.close()
+
+    assert exc_info.value.code == 503
+
+
+def test_status_http_server_rejects_stale_snapshot(monkeypatch):
+    now = 1000.0
+    monkeypatch.setattr("cradlewise_local.status._now", lambda: now)
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    store.update_snapshot(b"\xff\xd8frame\xff\xd9")
+    server = BridgeStatusHttpServer(
+        store,
+        "127.0.0.1",
+        _free_port(),
+        snapshot_max_age_seconds=1,
+    )
+    server.start()
+
+    now = 1002.0
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{server.port}/snapshot.jpg", timeout=2
+            )
+    finally:
+        server.close()
+
+    assert exc_info.value.code == 503
 
 
 def test_status_store_captures_cradle_state_and_beacon_payloads():
@@ -170,6 +338,28 @@ def test_status_store_maps_rich_shadow_state():
     assert device_state["charging"] is True
     assert device_state["power_supply_removed"] is False
     assert device_state["source"] == "local_mqtt"
+
+
+@pytest.mark.parametrize(
+    ("raw_state", "expected"),
+    [
+        (0, "Baby not present"),
+        (2, "Active Awake"),
+        (3, "Quite Awake"),
+        (4, "Light sleep"),
+        (5, "Deep sleep"),
+        (1, "unknown (1)"),
+    ],
+)
+def test_status_store_maps_local_sleep_state_values(raw_state, expected):
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+
+    store.update_device_state(
+        {"state": {"reported": {"babySleepState": raw_state}}},
+        source="local_shadow",
+    )
+
+    assert store.snapshot()["device_state"]["sleep_state"] == expected
 
 
 def test_status_store_keeps_cloud_device_state_when_local_state_is_sparse():
@@ -369,8 +559,12 @@ def test_status_store_maps_live_cloud_state_shape():
     assert device_state["sleep_state_internal"] == 0
     assert device_state["sleep_state_being_determined"] is False
     assert device_state["sleep_phase_event_start_time"] == "2026-06-24 02:10:31.856625"
-    assert device_state["sleep_phase_duration_start_time"] == "2026-06-24 01:08:31.968945"
-    assert device_state["sleep_phase_present_toggle_time"] == "2026-06-24 01:08:20.242141"
+    assert (
+        device_state["sleep_phase_duration_start_time"] == "2026-06-24 01:08:31.968945"
+    )
+    assert (
+        device_state["sleep_phase_present_toggle_time"] == "2026-06-24 01:08:20.242141"
+    )
     assert device_state["baby_presence_being_determined"] is False
     assert device_state["baby_needs_attention"] is False
     assert device_state["baby_needs_help"] is False
@@ -385,7 +579,8 @@ def test_status_store_maps_live_cloud_state_shape():
     assert device_state["music_volume"] == 4
     assert device_state["music_level"] == 5
     assert device_state["music_mood"] == "rain"
-    assert device_state["light_intensity"] == 30
+    assert device_state["light_intensity"] is None
+    assert device_state["light_indicator_brightness"] == 30
     assert device_state["cradle_mode"] == "Crib"
     assert device_state["volume_profile"] == "max"
     assert device_state["music_duration"] == 60
@@ -529,7 +724,9 @@ def test_status_store_defaults_omitted_inactive_flags_from_live_shadow():
     assert device_state["inside_sleep_schedule"] is False
     assert device_state["inside_soothing_window"] is False
     assert device_state["rocking_not_effective"] is False
-    assert device_state["light_on"] is False
+    assert device_state["light_on"] is None
+    assert device_state["light_intensity"] is None
+    assert device_state["light_indicator_brightness"] == 0
     assert device_state["volume_profile"] == "normal"
     assert device_state["wifi_stats_ssid"] == "Nursery-IoT"
     assert device_state["wifi_stats_bitrate"] is None

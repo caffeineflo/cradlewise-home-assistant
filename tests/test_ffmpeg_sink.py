@@ -1,3 +1,5 @@
+import queue
+
 from cradlewise_local.sinks import FfmpegRtspSink, NullSink
 
 
@@ -30,9 +32,7 @@ def test_ffmpeg_rtsp_sink_command_copies_h264_and_transcodes_audio():
         command.index("-c:v") : command.index("-c:v") + 2
     ]
     assert "libx264" not in command
-    assert ["-c:a", "aac"] == command[
-        command.index("-c:a") : command.index("-c:a") + 2
-    ]
+    assert ["-c:a", "aac"] == command[command.index("-c:a") : command.index("-c:a") + 2]
     assert ["-pkt_size", "1200"] == command[
         command.index("-pkt_size") : command.index("-pkt_size") + 2
     ]
@@ -61,9 +61,7 @@ def test_ffmpeg_rtsp_sink_command_can_encode_raw_bgr_for_diagnostics():
         for index, value in enumerate(command)
         if value == "-f"
     ]
-    assert ["-c:a", "aac"] == command[
-        command.index("-c:a") : command.index("-c:a") + 2
-    ]
+    assert ["-c:a", "aac"] == command[command.index("-c:a") : command.index("-c:a") + 2]
     assert ["-b:v", "1800k"] == command[
         command.index("-b:v") : command.index("-b:v") + 2
     ]
@@ -102,3 +100,82 @@ def test_null_sink_counts_frames():
     assert sink.height is None
     assert sink.frames == 2
     assert sink.audio_frames == 1
+
+
+def test_ffmpeg_sink_health_reports_writer_failure():
+    sink = FfmpegRtspSink(output_url="rtsp://127.0.0.1:8554/cradlewise")
+
+    class Process:
+        def poll(self):
+            return None
+
+    class Thread:
+        def is_alive(self):
+            return True
+
+    sink.process = Process()
+    sink.video_thread = Thread()
+    assert sink.health_snapshot()["healthy"] is True
+
+    sink._writer_error = "video writer failed: broken pipe"
+    health = sink.health_snapshot()
+
+    assert health["healthy"] is False
+    assert health["error"] == "video writer failed: broken pipe"
+
+
+def test_ffmpeg_sink_drops_backlog_and_waits_for_h264_sync():
+    sink = FfmpegRtspSink(output_url="rtsp://127.0.0.1:8554/cradlewise")
+
+    class Process:
+        returncode = None
+
+        def poll(self):
+            return None
+
+    sink.process = Process()
+    sink.video_queue = queue.Queue(maxsize=1)
+    sink.video_queue.put_nowait(b"pending")
+
+    sink.write_h264(b"next")
+
+    assert sink.health_snapshot()["dropped_video_frames"] == 2
+
+
+def test_ffmpeg_sink_resumes_on_h264_sync_after_overflow():
+    sink = FfmpegRtspSink(output_url="rtsp://127.0.0.1:8554/cradlewise")
+
+    class Process:
+        returncode = None
+
+        def poll(self):
+            return None
+
+    sink.process = Process()
+    sink.video_queue = queue.Queue(maxsize=1)
+    sink.video_queue.put_nowait(b"pending")
+    sink.write_h264(b"overflow")
+    sink.write_h264(b"non-keyframe")
+
+    sync_point = b"\x00\x00\x01\x67\x01\x00\x00\x01\x68\x01\x00\x00\x01\x65\x01"
+    sink.write_h264(sync_point)
+
+    assert sink.video_queue.get_nowait() == sync_point
+
+
+def test_ffmpeg_sink_accepts_a_ten_second_startup_burst():
+    sink = FfmpegRtspSink(output_url="rtsp://127.0.0.1:8554/cradlewise")
+
+    class Process:
+        returncode = None
+
+        def poll(self):
+            return None
+
+    sink.process = Process()
+    sink.video_queue = queue.Queue(maxsize=sink.video_queue_capacity)
+
+    for _ in range(sink.frame_rate * 10):
+        sink.write_h264(b"frame")
+
+    assert sink.video_queue.qsize() == 100

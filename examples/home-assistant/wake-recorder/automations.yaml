@@ -1,53 +1,69 @@
-- id: cradlewise_wake_buffer_start
-  alias: Cradlewise Wake Buffer Start
-  description: Starts the rolling Cradlewise video buffer used for wake recordings.
-  mode: single
-  triggers:
-    - trigger: homeassistant
-      event: start
-  actions:
-    - action: shell_command.cradlewise_wake_buffer_start
-
 - id: cradlewise_wake_recording
   alias: Cradlewise Wake Recording
-  description: Records wake events with two minutes before and after the event.
+  description: Records wake events with two minutes before and after the trigger.
   mode: single
   max_exceeded: silent
   triggers:
     - trigger: state
       entity_id: sensor.cradlewise_local_sleep_phase
+      from: "sleep"
+      to: "awake"
+      id: sleep_phase_awake
+    - trigger: state
+      entity_id: sensor.cradlewise_local_sleep_phase
+      from: "sleep"
+      to: "stirring"
+      id: sleep_phase_stirring
     - trigger: state
       entity_id: sensor.cradlewise_local_sleep_state
+      from: "Light sleep"
+      to: "Quite Awake"
+      id: light_sleep_quite_awake
     - trigger: state
-      entity_id:
-        - binary_sensor.cradlewise_local_baby_needs_attention
-        - binary_sensor.cradlewise_local_baby_needs_help
+      entity_id: sensor.cradlewise_local_sleep_state
+      from: "Light sleep"
+      to: "Active Awake"
+      id: light_sleep_active_awake
+    - trigger: state
+      entity_id: sensor.cradlewise_local_sleep_state
+      from: "Deep sleep"
+      to: "Quite Awake"
+      id: deep_sleep_quite_awake
+    - trigger: state
+      entity_id: sensor.cradlewise_local_sleep_state
+      from: "Deep sleep"
+      to: "Active Awake"
+      id: deep_sleep_active_awake
+    - trigger: state
+      entity_id: binary_sensor.cradlewise_local_baby_needs_attention
       to: "on"
+      id: baby_needs_attention
+    - trigger: state
+      entity_id: binary_sensor.cradlewise_local_baby_needs_help
+      to: "on"
+      id: baby_needs_help
   conditions:
-    - condition: template
-      value_template: >-
-        {{ is_state('binary_sensor.cradlewise_local_baby_present', 'on')
-           and (
-             trigger.entity_id not in [
-               'sensor.cradlewise_local_sleep_phase',
-               'sensor.cradlewise_local_sleep_state'
-             ]
-             or (
-               trigger.from_state is not none
-               and trigger.to_state is not none
-               and (
-                 (
-                   trigger.entity_id == 'sensor.cradlewise_local_sleep_phase'
-                   and trigger.from_state.state == 'sleep'
-                   and trigger.to_state.state in ['awake', 'stirring']
-                 )
-                 or (
-                   trigger.entity_id == 'sensor.cradlewise_local_sleep_state'
-                   and trigger.from_state.state in ['Light sleep', 'Deep sleep']
-                   and trigger.to_state.state in ['Quite Awake', 'Active Awake']
-                 )
-               )
-             )
-           ) }}
+    - condition: state
+      entity_id: binary_sensor.cradlewise_local_baby_present
+      state: "on"
   actions:
-    - action: shell_command.cradlewise_wake_event_record
+    - action: camera.record
+      target:
+        entity_id: camera.cradlewise_local_2
+      data:
+        filename: >-
+          /media/cradlewise-wake/events/cradlewise_wake_{{ now().strftime('%Y%m%d-%H%M%S') }}.mp4
+        duration: 120
+        lookback: 120
+
+- id: cradlewise_wake_retention
+  alias: Cradlewise Wake Recording Retention
+  description: Deletes Cradlewise wake recordings after 14 days.
+  mode: single
+  triggers:
+    - trigger: homeassistant
+      event: start
+    - trigger: time
+      at: "03:15:00"
+  actions:
+    - action: shell_command.cradlewise_wake_retention

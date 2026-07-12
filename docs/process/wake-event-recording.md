@@ -1,83 +1,61 @@
 # Wake Event Recording
 
-The Home Assistant integration can be paired with a small helper script to
-record wake events with pre-roll. This is optional and runs entirely inside
-Home Assistant; the core `cradlewise_local` integration still only provides
-camera, state, and control entities.
+The Cradlewise integration can use Home Assistant's native `camera.record`
+action to save short wake-event clips. No helper script, background process,
+extra FFmpeg process, or public web gallery is required. One short daily shell
+command deletes expired media; it does not supervise a process.
 
-The recorder keeps a rolling buffer of short transport-stream segments. When
-Home Assistant sees a wake event, it copies the last two minutes of buffer,
-records until the wake condition clears, waits another two minutes, and writes
-one MP4 clip.
+Each recording requests two minutes of HLS lookback plus two minutes after the
+trigger. Home Assistant writes the resulting MP4 directly under `/media`, where
+it remains behind Home Assistant authentication.
 
 ## Requirements
 
-- Home Assistant can read the Cradlewise RTSP stream.
-- The `cradlewise_local` integration is configured with a bridge status URL.
-- `ffmpeg` is available in the Home Assistant Core environment.
-- The bridge publishes baby/sleep state through `/state`. That requires cloud
-  state polling in the bridge if the local MQTT state is not enough for your
-  device.
+- `camera.cradlewise_local_2` provides a working stream.
+- Home Assistant's Stream integration is loaded.
+- **Preload stream** is enabled for the Cradlewise camera entity. Lookback is
+  available only while an HLS stream is already active.
+- The bridge publishes the baby and sleep state entities used by the
+  automation from the crib's local MQTT shadow.
+- `/media/cradlewise-wake/events` exists and is writable by Home Assistant.
+
+The example uses the entity IDs from the current deployment. Change the camera
+entity ID if another installation assigned a different ID.
 
 ## Install
 
-Copy the helper script into Home Assistant:
+1. Open the Cradlewise camera entity in Home Assistant and enable **Preload
+   stream**.
+2. Create the destination directory once from the Terminal & SSH App:
 
-```bash
-scp examples/home-assistant/wake-recorder/cradlewise_wake_recorder.py \
-  root@homeassistant.local:/config/cradlewise_wake_recorder.py
-```
+   ```bash
+   mkdir -p /media/cradlewise-wake/events
+   ```
 
-Add the shell commands from
-`examples/home-assistant/wake-recorder/shell_commands.yaml` to your
-`/config/shell_commands.yaml`.
+3. Add `examples/home-assistant/wake-recorder/automations.yaml` through the
+   automation editor or merge it into `/config/automations.yaml`.
+4. Merge `examples/home-assistant/wake-recorder/shell_commands.yaml` into your
+   existing `shell_command` configuration.
+5. Run `ha core check`. Restart Core once to load the shell command, then
+   reload automations. Later automation-only edits need only an automation
+   reload.
+6. After enabling preload or restarting Home Assistant, allow at least two
+   minutes for the lookback buffer to fill before expecting a complete
+   pre-trigger window.
 
-Set the stream and status URLs in both shell commands:
-
-```yaml
-CRADLEWISE_WAKE_STREAM_URL="rtsp://192.0.2.20:8560/cradlewise"
-CRADLEWISE_WAKE_STATUS_URL="http://192.0.2.20:8088/state"
-```
-
-Add the automations from
-`examples/home-assistant/wake-recorder/automations.yaml` to your
-`/config/automations.yaml`.
-
-Check and restart Home Assistant:
-
-```bash
-ha core check
-ha core restart
-```
-
-After restart, the startup automation should create files under:
-
-```text
-/media/cradlewise-wake/buffer
-```
-
-Wake clips are written to:
+Recordings appear under Local Media in Home Assistant and on disk at:
 
 ```text
 /media/cradlewise-wake/events
 ```
 
-The helper also writes a small gallery page with the latest eight clips:
-
-```text
-/config/www/cradlewise-wake/index.html
-```
-
-In Home Assistant, that page is available at:
-
-```text
-/local/cradlewise-wake/index.html
-```
+Do not copy these clips to `/config/www` or serve them through `/local`.
+Home Assistant does not protect `/local` files with authentication.
 
 ## Trigger Behavior
 
-The example starts a wake recording only when the baby is present in the crib
-and one of these events happens:
+The example starts a recording only when the baby is present and one of these
+events happens:
 
 - `sensor.cradlewise_local_sleep_phase` changes from `sleep` to `awake`
 - `sensor.cradlewise_local_sleep_phase` changes from `sleep` to `stirring`
@@ -88,60 +66,48 @@ and one of these events happens:
 - `binary_sensor.cradlewise_local_baby_needs_attention` turns on
 - `binary_sensor.cradlewise_local_baby_needs_help` turns on
 
+The six stable state anchors for this workflow are:
+
+- `binary_sensor.cradlewise_local_baby_present`
+- `binary_sensor.cradlewise_local_baby_needs_attention`
+- `binary_sensor.cradlewise_local_baby_needs_help`
+- `binary_sensor.cradlewise_local_loud_sound_detected`
+- `sensor.cradlewise_local_sleep_phase`
+- `sensor.cradlewise_local_sleep_state`
+
+`loud_sound_detected` intentionally remains informational and does not start a
+recording. This preserves the existing trigger behavior and avoids creating a
+clip for every detected sound.
+
 The sleep phase values come from the Cradlewise Android app mapping:
 `0=away`, `1=awake`, `2=stirring`, `3=stirring`, `4=sleep`,
 `5=awake`, and `6=stirring`.
 
-There is no night-only filter in the example. If you only want overnight clips,
-add a time condition to the automation. Leaving the clock out also captures nap
-wakeups.
+There is no night-only filter. Leaving the clock out captures both overnight
+wakeups and nap wakeups.
 
-## Tuning
+The automation uses `mode: single`, so another trigger during an active
+two-minute recording does not start an overlapping recording. The existing
+clip still covers that later trigger's point in time.
 
-The default pre-roll and post-roll are both two minutes. Override them in the
-shell commands:
+## Lookback Limitations
 
-```yaml
-CRADLEWISE_WAKE_PRE_SECONDS="120"
-CRADLEWISE_WAKE_POST_SECONDS="120"
-```
+`lookback: 120` is a request to Home Assistant, not a guaranteed frame-exact
+duration. The actual pre-roll depends on the HLS stream already being active
+and having enough buffered media. The actual total duration can also vary by a
+few seconds at stream segment boundaries.
 
-Available environment variables:
+Verify after installation that recordings contain audio, approximately two
+minutes before the trigger, and approximately two minutes after it. If preload
+is disabled or the stream recently restarted, Home Assistant can still record
+the post-trigger portion but may have little or no lookback.
 
-| Variable | Default | Purpose |
-|---|---:|---|
-| `CRADLEWISE_WAKE_STREAM_URL` | required | RTSP stream URL |
-| `CRADLEWISE_WAKE_STATUS_URL` | required | Bridge `/state` URL |
-| `CRADLEWISE_WAKE_BASE_DIR` | `/media/cradlewise-wake` | Clip and buffer directory |
-| `CRADLEWISE_WAKE_GALLERY_DIR` | `/config/www/cradlewise-wake` | HA-served gallery directory |
-| `CRADLEWISE_WAKE_SEGMENT_SECONDS` | `5` | Rolling buffer segment length |
-| `CRADLEWISE_WAKE_PRE_SECONDS` | `120` | Seconds before the wake trigger |
-| `CRADLEWISE_WAKE_POST_SECONDS` | `120` | Seconds after the wake clears |
-| `CRADLEWISE_WAKE_BUFFER_RETENTION_SECONDS` | `900` | Maximum buffer retention |
-| `CRADLEWISE_WAKE_POLL_SECONDS` | `5` | Status polling interval during events |
-| `CRADLEWISE_WAKE_MAX_EVENT_SECONDS` | `14400` | Safety cap for one event |
+## Retention And Privacy
 
-## Notes
+The retention automation runs at Home Assistant startup and at 03:15 each day.
+It deletes matching Cradlewise MP4 files older than 14 days. HA recorder
+database purge settings do not remove media files, so keep this automation
+enabled or replace it with another explicit storage policy.
 
-The buffer process opens the RTSP stream continuously. That is acceptable for a
-powered crib camera, but users should still watch CPU, disk, and network usage
-after enabling it.
-
-The helper stores temporary `.ts` segments in the buffer directory and final
-`.mp4` clips in the events directory. It also writes a small JSON sidecar for
-each final clip with the event timestamp, pre-roll/post-roll settings, and stop
-reason.
-
-## Dashboard Card
-
-Add a webpage card to a Home Assistant dashboard:
-
-```yaml
-type: iframe
-title: Cradlewise Wake Clips
-url: /local/cradlewise-wake/index.html
-aspect_ratio: 62%
-```
-
-The page refreshes itself every five minutes and is regenerated whenever the
-recorder writes a new clip.
+Also review whether `/media` is included in Home Assistant or VM backups.
+Keeping many clips can increase both live disk use and backup size.

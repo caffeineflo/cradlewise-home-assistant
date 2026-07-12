@@ -16,9 +16,13 @@ class CommandUnavailable(RuntimeError):
 
 
 PublishDesired = Callable[[dict[str, Any]], dict[str, Any]]
+StateProvider = Callable[[], dict[str, Any]]
 
 VOLUME_PROFILES = {"gentle", "normal", "max"}
 CRY_SENSITIVITY_VALUES = {0, 1, 2, 4, 6}
+MUSIC_DURATION_VALUES = {-1, 60, 180}
+RESPONSIVITY_VALUES = {2, 4, 6, 8, 10}
+START_RECIPE_LOCK_DURATION_VALUES = {10, 20, 30}
 
 
 def _bool(value: Any) -> bool:
@@ -35,10 +39,23 @@ def _int_between(value: Any, minimum: int, maximum: int) -> int:
     return value
 
 
+def _int_one_of(value: Any, allowed: set[int]) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise CommandError("value must be an integer")
+    if value not in allowed:
+        choices = ", ".join(str(choice) for choice in sorted(allowed))
+        raise CommandError(f"value must be one of {choices}")
+    return value
+
+
 def _mode(value: Any) -> int:
-    if value in ("auto", "Auto", 0):
+    if isinstance(value, bool):
+        raise CommandError("value must be auto/manual or 0/1")
+    if isinstance(value, str):
+        value = value.strip().lower()
+    if value in ("auto", 0):
         return 0
-    if value in ("manual", "Manual", 1):
+    if value in ("manual", 1):
         return 1
     raise CommandError("value must be auto/manual or 0/1")
 
@@ -68,11 +85,11 @@ def build_desired(command: str, value: Any) -> dict[str, Any]:
     if command == "bounce_amplitude":
         return {"actuator": {"amplitude": _int_between(value, 0, 100)}}
     if command == "bounce_duration":
-        return {"actuator": {"duration": _int_between(value, 0, 1440)}}
+        return {"actuator": {"duration": _int_between(value, 1, 60)}}
     if command == "bounce_setting":
         return {"bounceSetting": _int_between(value, 0, 10)}
     if command == "responsivity_setting":
-        return {"responsivitySetting": _int_between(value, 0, 10)}
+        return {"responsivitySetting": _int_one_of(value, RESPONSIVITY_VALUES)}
     if command == "disable_bounce":
         return {"actuator": {"disableBouncing": _bool(value)}}
     if command == "super_gentle_bounce":
@@ -88,11 +105,11 @@ def build_desired(command: str, value: Any) -> dict[str, Any]:
     if command == "bounce_level":
         return {"bounceLevel": _int_between(value, 0, 5)}
     if command == "music_playing":
-        return {"music": {"play": _bool(value)}}
+        return {"soundSynth": {"play": _bool(value)}}
     if command == "music_mode":
         return {"musicMode": _mode(value)}
     if command == "music_volume":
-        return {"music": {"volume": _int_between(value, 0, 100)}}
+        return {"soundSynth": {"volume": _int_between(value, 0, 100)}}
     if command == "music_level":
         return {"musicLevel": _int_between(value, 0, 5)}
     if command == "volume_profile":
@@ -108,13 +125,13 @@ def build_desired(command: str, value: Any) -> dict[str, Any]:
     if command == "keep_bounce_on_during_sleep":
         return {"keepBounceOnDuringSleep": _bool(value)}
     if command == "keep_bounce_on_during_sleep_level":
-        return {"keepBounceOnDuringSleepLevel": _int_between(value, 0, 5)}
+        return {"keepBounceOnDuringSleepLevel": _int_one_of(value, {0, 1})}
     if command == "auto_mode_lock_on":
         return {"autoModeLockOn": _bool(value)}
     if command == "auto_mode_lock_duration":
-        return {"autoModeLockDuration": _int_between(value, 0, 1440)}
+        return {"autoModeLockDuration": _int_between(value, 1, 60)}
     if command == "music_duration":
-        return {"musicDuration": _int_between(value, 0, 1440)}
+        return {"musicDuration": _int_one_of(value, MUSIC_DURATION_VALUES)}
     if command == "max_bounce_limit":
         return {"maxBounceLimit": _int_between(value, 0, 100)}
     if command == "max_volume_limit":
@@ -122,11 +139,15 @@ def build_desired(command: str, value: Any) -> dict[str, Any]:
     if command == "start_recipe_enabled":
         return {"startRecipeEnabled": _bool(value)}
     if command == "start_recipe_music_level":
-        return {"startRecipeMusicLevel": _int_between(value, 0, 5)}
+        return {"startRecipeMusicLevel": _int_between(value, -1, 4)}
     if command == "start_recipe_bounce_level":
-        return {"startRecipeBounceLevel": _int_between(value, 0, 5)}
+        return {"startRecipeBounceLevel": _int_between(value, -1, 4)}
     if command == "start_recipe_lock_duration":
-        return {"startRecipeLockDuration": _int_between(value, 0, 1440)}
+        return {
+            "startRecipeLockDuration": _int_one_of(
+                value, START_RECIPE_LOCK_DURATION_VALUES
+            )
+        }
     if command == "adaptive_soothing_enabled":
         return {"control": {"adaptiveSoothingEnabled": _bool(value)}}
     if command == "cry_sensitivity":
@@ -143,9 +164,10 @@ def shadow_payload(desired: dict[str, Any]) -> dict[str, Any]:
 class BridgeCommandHandler:
     """Thread-safe HTTP command adapter around the active MQTT publisher."""
 
-    def __init__(self) -> None:
+    def __init__(self, state_provider: StateProvider | None = None) -> None:
         self._lock = threading.Lock()
         self._publisher: PublishDesired | None = None
+        self._state_provider = state_provider
 
     def set_publisher(self, publisher: PublishDesired) -> None:
         with self._lock:
@@ -159,7 +181,11 @@ class BridgeCommandHandler:
         command = payload.get("command")
         if not isinstance(command, str) or not command:
             raise CommandError("command must be a non-empty string")
-        desired = build_desired(command, payload.get("value"))
+        value = payload.get("value")
+        desired = build_desired(command, value)
+        state = self._current_device_state()
+        self._validate_live_limit(command, value, state)
+        desired = self._build_runtime_desired(command, value, desired, state)
 
         with self._lock:
             publisher = self._publisher
@@ -170,4 +196,76 @@ class BridgeCommandHandler:
             publisher(shadow_payload(desired))
         except RuntimeError as exc:
             raise CommandUnavailable(str(exc)) from exc
-        return {"ok": True, "command": command, "desired": desired}
+        return {
+            "ok": True,
+            "status": "queued",
+            "command": command,
+            "desired": desired,
+        }
+
+    def _current_device_state(self) -> dict[str, Any] | None:
+        if self._state_provider is None:
+            return None
+        state = self._state_provider().get("device_state")
+        return state if isinstance(state, dict) else None
+
+    def _validate_live_limit(
+        self, command: str, value: Any, state: dict[str, Any] | None
+    ) -> None:
+        if state is None or isinstance(value, bool):
+            return
+        limits = {
+            "bounce_amplitude": ("max_bounce_limit", "bounce amplitude"),
+            "bounce_duration": ("bounce_duration_limit", "bounce duration"),
+            "music_volume": ("max_volume_limit", "music volume"),
+        }
+        limit_spec = limits.get(command)
+        if limit_spec is None:
+            return
+        limit_key, label = limit_spec
+        limit = state.get(limit_key)
+        if not isinstance(limit, int):
+            raise CommandUnavailable(f"{label} limit is not available yet")
+        if isinstance(value, int) and value > limit:
+            raise CommandError(f"{label} must not exceed the device limit of {limit}")
+
+    @staticmethod
+    def _build_runtime_desired(
+        command: str,
+        value: Any,
+        desired: dict[str, Any],
+        state: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if state is None or command not in {"music_playing", "music_volume"}:
+            return desired
+
+        sound_synth = {
+            "play": value if command == "music_playing" else state.get("music_playing"),
+            "ambience": state.get("sound_ambience_raw"),
+            "color": state.get("sound_color_raw"),
+            "heartbeatVolume": state.get("sound_heartbeat_volume"),
+            "breathVolume": state.get("sound_breath_volume"),
+            "volume": value if command == "music_volume" else state.get("music_volume"),
+            "trackName": state.get("music_mood"),
+        }
+        if any(field_value is None for field_value in sound_synth.values()):
+            raise CommandUnavailable("sound synthesizer state is not available yet")
+        if not isinstance(sound_synth["play"], bool):
+            raise CommandUnavailable("sound synthesizer play state is invalid")
+        if sound_synth["ambience"] not in {0, 1, 2, 3}:
+            raise CommandUnavailable("sound synthesizer ambience state is invalid")
+        if sound_synth["color"] not in {0, 1, 2}:
+            raise CommandUnavailable("sound synthesizer color state is invalid")
+        for field_name in ("heartbeatVolume", "breathVolume", "volume"):
+            field_value = sound_synth[field_name]
+            if (
+                isinstance(field_value, bool)
+                or not isinstance(field_value, int)
+                or not 0 <= field_value <= 100
+            ):
+                raise CommandUnavailable(
+                    f"sound synthesizer {field_name} state is invalid"
+                )
+        if not isinstance(sound_synth["trackName"], str):
+            raise CommandUnavailable("sound synthesizer track state is invalid")
+        return {"soundSynth": sound_synth}

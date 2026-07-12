@@ -1,5 +1,6 @@
 .git/
 .pytest_cache/
+.ruff_cache/
 .venv/
 __pycache__/
 *.pyc
@@ -12,5 +13,6 @@ decompiled/
 xapk_extracted/
 *.apk
 *.xapk
+dist/
 
 fharr/

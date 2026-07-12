@@ -20,25 +20,21 @@ import signal
 import socket
 import ssl
 import subprocess
-import threading
 import time
 import uuid
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
-from paho.mqtt.enums import CallbackAPIVersion
-
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa
-
 from aiortc import (
     RTCConfiguration,
     RTCPeerConnection,
     RTCSessionDescription,
 )
 from aiortc.rtcdtlstransport import RTCCertificate
-from aiortc.rtcicetransport import RTCIceCandidate
 from aiortc.sdp import candidate_from_sdp
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import rsa
+from paho.mqtt.enums import CallbackAPIVersion
 
 
 def _make_rsa_certificate():
@@ -50,7 +46,6 @@ def _make_rsa_certificate():
     RSA cipher suites.
     """
     from aiortc.rtcdtlstransport import generate_certificate
-    from OpenSSL import SSL
 
     key = rsa.generate_private_key(
         public_exponent=65537,
@@ -65,13 +60,12 @@ def _make_rsa_certificate():
 
     def patched_create(srtp_profiles):
         ctx = original_create(srtp_profiles)
-        ctx.set_cipher_list(
-            b"HIGH:!aNULL:!MD5"
-        )
+        ctx.set_cipher_list(b"HIGH:!aNULL:!MD5")
         return ctx
 
     rsa_cert._create_ssl_context = patched_create
     return rsa_cert
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -114,16 +108,20 @@ def discover_crib(cradle_id=None):
         udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
-        broadcast_msg = json.dumps({
-            "cradlewise_mobile_port": str(tcp_port),
-            "device_id": DEVICE_ID,
-        }).encode()
+        broadcast_msg = json.dumps(
+            {
+                "cradlewise_mobile_port": str(tcp_port),
+                "device_id": DEVICE_ID,
+            }
+        ).encode()
 
         for i in range(DISCOVERY_BROADCASTS_PER_ATTEMPT):
             udp_sock.sendto(broadcast_msg, ("255.255.255.255", DISCOVERY_UDP_PORT))
         log.info(
             "Sent %d broadcasts on UDP port %d (callback TCP port %d)",
-            DISCOVERY_BROADCASTS_PER_ATTEMPT, DISCOVERY_UDP_PORT, tcp_port,
+            DISCOVERY_BROADCASTS_PER_ATTEMPT,
+            DISCOVERY_UDP_PORT,
+            tcp_port,
         )
         udp_sock.close()
 
@@ -133,34 +131,39 @@ def discover_crib(cradle_id=None):
             crib_ip = addr[0]
             log.info("TCP connection from %s", crib_ip)
 
-            data = client_sock.recv(4096)
-            client_sock.close()
+            with client_sock:
+                data = client_sock.recv(4096)
             tcp_server.close()
 
             if data:
                 try:
                     info = json.loads(data.decode())
+                    if not isinstance(info, dict):
+                        log.warning("Non-object TCP response: %s", data[:100])
+                        continue
                     found_cradle_id = info.get("cradleId", "")
                     log.info(
                         "Discovered crib: ip=%s cradle_id=%s",
-                        crib_ip, found_cradle_id,
+                        crib_ip,
+                        found_cradle_id,
                     )
 
                     if cradle_id and found_cradle_id != cradle_id:
                         log.warning(
                             "Cradle ID mismatch: expected %s, got %s",
-                            cradle_id, found_cradle_id,
+                            cradle_id,
+                            found_cradle_id,
                         )
                         continue
 
                     return crib_ip, found_cradle_id or cradle_id
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, UnicodeDecodeError):
                     log.warning("Non-JSON TCP response: %s", data[:100])
             else:
                 log.info("Crib connected but sent no data, using IP %s", crib_ip)
                 return crib_ip, cradle_id
 
-        except socket.timeout:
+        except TimeoutError:
             log.info("No response on attempt %d", attempt)
             tcp_server.close()
             continue
@@ -176,7 +179,12 @@ def discover_crib(cradle_id=None):
     )
 
 
-def discover_crib_cloud(cradle_id):
+def discover_crib_cloud(
+    cradle_id,
+    email=None,
+    password=None,
+    allow_interactive=True,
+):
     """Discover crib IP via the Cradlewise cloud API.
 
     Authenticates with Cognito, then queries the onlineStatus endpoint
@@ -191,11 +199,16 @@ def discover_crib_cloud(cradle_id):
             get_cradle_ip,
             get_credentials_interactive,
         )
-    except ImportError:
-        raise RuntimeError("cradlewise_api module not found")
+    except ImportError as exc:
+        raise RuntimeError("cradlewise_api module not found") from exc
 
     log.info("Cloud discovery: authenticating...")
-    email, password = get_credentials_interactive()
+    if bool(email) != bool(password):
+        raise RuntimeError("Cloud discovery requires both email and password")
+    if not email or not password:
+        if not allow_interactive:
+            raise RuntimeError("Cloud discovery credentials are not configured")
+        email, password = get_credentials_interactive()
     _, id_token = authenticate(email, password)
     credentials, _ = get_aws_credentials(id_token)
 
@@ -208,53 +221,79 @@ def discover_crib_cloud(cradle_id):
     return ip
 
 
-def discover_crib_race(cradle_id):
-    """Race UDP discovery against cloud API lookup.
+def discover_crib_race(
+    cradle_id,
+    *,
+    email=None,
+    password=None,
+    allow_interactive=True,
+):
+    """Resolve the crib by UDP and, when configured, cloud lookup.
 
-    Runs both in parallel, returns the IP from whichever succeeds first.
-    If both fail, raises RuntimeError.
+    Credentialed non-interactive lookups race in parallel. Interactive CLI
+    discovery tries UDP first so a losing cloud prompt cannot remain active.
     """
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        udp_future = executor.submit(discover_crib, cradle_id)
-        cloud_future = executor.submit(discover_crib_cloud, cradle_id)
+    if allow_interactive and not (email and password):
+        errors = []
+        try:
+            result = discover_crib(cradle_id)
+            ip, _ = result
+            return ip
+        except Exception as exc:
+            errors.append(f"UDP: {exc}")
+            log.warning("UDP discovery failed: %s", exc)
+        try:
+            return discover_crib_cloud(
+                cradle_id,
+                email,
+                password,
+                allow_interactive=True,
+            )
+        except Exception as exc:
+            errors.append(f"cloud: {exc}")
+            log.warning("Cloud discovery failed: %s", exc)
+        raise RuntimeError(f"Crib discovery failed: {'; '.join(errors)}")
 
-        done, not_done = concurrent.futures.wait(
-            [udp_future, cloud_future],
-            return_when=concurrent.futures.FIRST_COMPLETED,
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    futures = {executor.submit(discover_crib, cradle_id): "UDP"}
+    if (email and password) or allow_interactive:
+        cloud_future = executor.submit(
+            discover_crib_cloud,
+            cradle_id,
+            email,
+            password,
+            allow_interactive,
         )
+        futures[cloud_future] = "cloud"
 
-        # Check completed futures for a successful result
-        for future in done:
+    errors = []
+    try:
+        for future in concurrent.futures.as_completed(futures, timeout=30):
+            method = futures[future]
             try:
                 result = future.result()
-                # UDP returns (ip, cradle_id), cloud returns just ip
-                if isinstance(result, tuple):
-                    ip, _ = result
-                else:
-                    ip = result
-                # Cancel the other future (best-effort)
-                for f in not_done:
-                    f.cancel()
-                return ip
-            except Exception:
-                pass
+            except Exception as exc:
+                errors.append(f"{method}: {exc}")
+                log.warning("%s discovery failed: %s", method, exc)
+                continue
 
-        # First one failed, wait for the second
-        for future in not_done:
-            try:
-                result = future.result(timeout=30)
-                if isinstance(result, tuple):
-                    ip, _ = result
-                else:
-                    ip = result
+            for other_future in futures:
+                if other_future is not future:
+                    other_future.cancel()
+            if isinstance(result, tuple):
+                ip, _ = result
                 return ip
-            except Exception:
-                pass
+            return result
+    except concurrent.futures.TimeoutError:
+        pending_methods = [
+            method for future, method in futures.items() if not future.done()
+        ]
+        errors.append(f"timed out waiting for {', '.join(pending_methods)}")
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
-    raise RuntimeError(
-        "Crib discovery failed via both UDP and cloud API. "
-        "Check your network connection and Cradlewise credentials."
-    )
+    detail = "; ".join(errors) or "no discovery method returned an address"
+    raise RuntimeError(f"Crib discovery failed: {detail}")
 
 
 def _stream_info(session_id):
@@ -294,6 +333,9 @@ class CribStreamer:
         self._pc = None
         self._ffplay = None
         self._keepalive_task = None
+        self._track_tasks = set()
+        self._fatal_future = None
+        self._shutting_down = False
         self._frame_count = 0
 
     # -- MQTT layer --
@@ -323,19 +365,37 @@ class CribStreamer:
         if reason_code == 0:
             log.info("MQTT connected to %s:%d (flags=%s)", self.ip, MQTT_PORT, flags)
             self._handle_mqtt_connected()
-            client.subscribe(self.topic)
+            result, _ = client.subscribe(self.topic)
+            if result != mqtt.MQTT_ERR_SUCCESS:
+                self._signal_fatal_threadsafe(
+                    RuntimeError(f"MQTT signaling subscribe failed with rc={result}")
+                )
+                return
             # Only send getOffer if we don't already have a peer connection
             if self._pc is None:
-                self._publish(_get_offer_msg(self.session_id))
+                try:
+                    self._publish(_get_offer_msg(self.session_id))
+                except RuntimeError as exc:
+                    self._signal_fatal_threadsafe(exc)
+                    return
                 log.info("Sent getOffer (session %s)", self.session_id)
             else:
-                log.info("Reconnected -- peer connection already exists, skipping getOffer")
+                log.info(
+                    "Reconnected -- peer connection already exists, skipping getOffer"
+                )
         else:
             log.error("MQTT connect failed: %s", reason_code)
+            self._signal_fatal_threadsafe(
+                RuntimeError(f"MQTT connect failed: {reason_code}")
+            )
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties):
         log.warning("MQTT disconnected: reason_code=%s flags=%s", reason_code, flags)
         self._handle_mqtt_disconnected()
+        if reason_code != 0 and not self._shutting_down:
+            self._signal_fatal_threadsafe(
+                RuntimeError(f"MQTT disconnected: {reason_code}")
+            )
 
     def _handle_mqtt_connected(self):
         return None
@@ -346,17 +406,55 @@ class CribStreamer:
     def _on_message(self, client, userdata, message):
         if self._loop and self._queue:
             self._loop.call_soon_threadsafe(
-                self._queue.put_nowait, message.payload
+                self._enqueue_message, bytes(message.payload)
             )
+
+    def _enqueue_message(self, payload):
+        try:
+            self._queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            self._signal_fatal(
+                RuntimeError("MQTT signaling queue overflowed; restarting stream")
+            )
+
+    def _signal_fatal(self, error):
+        if self._fatal_future is not None and not self._fatal_future.done():
+            self._fatal_future.set_exception(error)
+
+    def _signal_fatal_threadsafe(self, error):
+        if self._loop is not None and not self._loop.is_closed():
+            self._loop.call_soon_threadsafe(self._signal_fatal, error)
+
+    def _start_owned_task(self, coroutine, name):
+        task = asyncio.create_task(coroutine, name=name)
+        self._track_tasks.add(task)
+
+        def task_done(completed):
+            self._track_tasks.discard(completed)
+            if completed.cancelled():
+                return
+            error = completed.exception()
+            if error is not None:
+                self._signal_fatal(error)
+
+        task.add_done_callback(task_done)
+        return task
 
     def _publish(self, payload):
         data = json.dumps(payload)
         log.debug("MQTT TX: %s", data[:200])
-        self._mqtt.publish(self.topic, data)
+        result = self._mqtt.publish(self.topic, data)
+        if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            raise RuntimeError(f"MQTT signaling publish failed with rc={result.rc}")
 
     # -- WebRTC signaling --
 
     async def _handle_offer(self, msg):
+        if self._pc is not None:
+            log.warning(
+                "Ignoring duplicate SDP offer for active session %s", self.session_id
+            )
+            return
         sdp_obj = msg.get("sdp", {})
         sdp_str = sdp_obj.get("sdp", "")
         stream_info = msg.get("streamInfo")
@@ -366,42 +464,53 @@ class CribStreamer:
         log.debug("SDP offer:\n%s", sdp_str[:500])
 
         # No STUN/TURN needed on LAN.
-        self._pc = RTCPeerConnection(
+        pc = RTCPeerConnection(
             configuration=RTCConfiguration(iceServers=[]),
         )
+        self._pc = pc
         # Replace the default ECDSA certificate with an RSA one.
         # The crib's Janus server uses RSA and rejects ECDSA-only
         # DTLS ClientHellos with a handshake_failure alert.
-        self._pc._RTCPeerConnection__certificates = [_make_rsa_certificate()]
+        pc._RTCPeerConnection__certificates = [_make_rsa_certificate()]
 
-        @self._pc.on("track")
+        @pc.on("track")
         async def on_track(track):
             log.info("Track received: %s", track.kind)
             self._prepare_track(track)
-            asyncio.ensure_future(self._handle_track(track))
+            self._start_owned_task(
+                self._handle_track(track), f"cradlewise-{track.kind}-consumer"
+            )
 
-        @self._pc.on("connectionstatechange")
+        @pc.on("connectionstatechange")
         async def on_conn_state():
-            state = self._pc.connectionState
+            state = pc.connectionState
             log.info("Connection state: %s", state)
             self._handle_webrtc_connection_state(state)
-            if state in ("failed", "closed"):
+            if (
+                state in ("failed", "closed", "disconnected")
+                and not self._shutting_down
+            ):
                 log.error("WebRTC connection %s", state)
+                self._signal_fatal(RuntimeError(f"WebRTC connection {state}"))
 
-        @self._pc.on("iceconnectionstatechange")
+        @pc.on("iceconnectionstatechange")
         async def on_ice_state():
-            log.info("ICE connection state: %s", self._pc.iceConnectionState)
-            self._handle_ice_connection_state(self._pc.iceConnectionState)
+            state = pc.iceConnectionState
+            log.info("ICE connection state: %s", state)
+            self._handle_ice_connection_state(state)
+            if (
+                state in ("failed", "closed", "disconnected")
+                and not self._shutting_down
+            ):
+                self._signal_fatal(RuntimeError(f"ICE connection {state}"))
 
         # Set remote description (the offer from the crib)
-        await self._pc.setRemoteDescription(
-            RTCSessionDescription(sdp=sdp_str, type="offer")
-        )
+        await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp_str, type="offer"))
         log.info("Remote description set")
 
         # Create and set our answer
-        answer = await self._pc.createAnswer()
-        await self._pc.setLocalDescription(answer)
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
         log.info("Local description set (answer, %d bytes)", len(answer.sdp))
         log.debug("SDP answer:\n%s", answer.sdp[:500])
 
@@ -409,36 +518,42 @@ class CribStreamer:
         ud = user_data or _user_data()
 
         # Send the SDP answer WITHOUT candidates (the app uses trickle ICE)
-        self._publish({
-            "command": "sendResponse",
-            "direction": "play",
-            "sdp": {"sdp": answer.sdp, "type": "answer"},
-            "streamInfo": si,
-            "userData": ud,
-        })
+        self._publish(
+            {
+                "command": "sendResponse",
+                "direction": "play",
+                "sdp": {"sdp": answer.sdp, "type": "answer"},
+                "streamInfo": si,
+                "userData": ud,
+            }
+        )
         log.info("Sent SDP answer")
 
         # Extract gathered ICE candidates from localDescription and send
         # them individually via MQTT iceMsg (trickle ICE, matching the app)
-        local_sdp = self._pc.localDescription.sdp
+        local_sdp = pc.localDescription.sdp
         for line in local_sdp.splitlines():
             if line.startswith("a=candidate:"):
                 candidate_str = line[2:]  # strip "a="
                 # Skip localhost
                 if "127.0.0.1" in candidate_str:
                     continue
-                self._publish({
-                    "streamInfo": si,
-                    "iceMsg": {
-                        "sdpMid": "video0",
-                        "candidate": candidate_str,
-                        "sdpMLineIndex": 0,
-                    },
-                })
+                self._publish(
+                    {
+                        "streamInfo": si,
+                        "iceMsg": {
+                            "sdpMid": "video0",
+                            "candidate": candidate_str,
+                            "sdpMLineIndex": 0,
+                        },
+                    }
+                )
                 log.info("Sent ICE candidate: %s", candidate_str[:80])
 
         # Start keepalive timer
-        self._keepalive_task = asyncio.ensure_future(self._keepalive_loop())
+        self._keepalive_task = self._start_owned_task(
+            self._keepalive_loop(), "cradlewise-keepalive"
+        )
 
     async def _handle_ice(self, msg):
         ice = msg.get("ice", {})
@@ -461,7 +576,7 @@ class CribStreamer:
         # Strip "candidate:" prefix if present
         raw = candidate_str
         if raw.startswith("candidate:"):
-            raw = raw[len("candidate:"):]
+            raw = raw[len("candidate:") :]
 
         candidate = candidate_from_sdp(raw)
         candidate.sdpMid = sdp_mid
@@ -475,12 +590,14 @@ class CribStreamer:
     async def _keepalive_loop(self):
         while True:
             await asyncio.sleep(KEEPALIVE_INTERVAL_S)
-            self._publish({
-                "direction": "play",
-                "command": "keepAlive",
-                "streamInfo": _stream_info(self.session_id),
-                "userData": _user_data(),
-            })
+            self._publish(
+                {
+                    "direction": "play",
+                    "command": "keepAlive",
+                    "streamInfo": _stream_info(self.session_id),
+                    "userData": _user_data(),
+                }
+            )
             log.debug("keepAlive sent")
 
     # -- Video output --
@@ -510,12 +627,18 @@ class CribStreamer:
 
         cmd = [
             "ffplay",
-            "-f", "rawvideo",
-            "-pixel_format", "bgr24",
-            "-video_size", f"{w}x{h}",
-            "-framerate", "15",
-            "-window_title", "Cradlewise Local Stream",
-            "-loglevel", "warning",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "bgr24",
+            "-video_size",
+            f"{w}x{h}",
+            "-framerate",
+            "15",
+            "-window_title",
+            "Cradlewise Local Stream",
+            "-loglevel",
+            "warning",
             "-",
         ]
         self._ffplay = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -532,70 +655,124 @@ class CribStreamer:
                 self._frame_count += 1
                 if self._frame_count % 300 == 0:
                     log.info("Frames received: %d", self._frame_count)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             log.error("Video consumer stopped: %s", exc)
+            raise
         finally:
             if self._ffplay:
                 self._ffplay.terminate()
 
     # -- Message dispatch --
 
+    def _session_matches(self, msg):
+        stream_info = msg.get("streamInfo")
+        received_session_id = (
+            stream_info.get("sessionId") if isinstance(stream_info, dict) else None
+        )
+        return received_session_id in {self.session_id, "[empty]"}
+
     async def _process_messages(self):
         while True:
             raw = await self._queue.get()
             try:
                 msg = json.loads(raw)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 log.warning("Invalid JSON from MQTT: %s", raw[:100])
+                continue
+            if not isinstance(msg, dict):
+                log.warning("Ignored non-object MQTT signaling payload")
                 continue
 
             direction = msg.get("direction")
             command = msg.get("command")
+            stream_info = msg.get("streamInfo")
+            received_session_id = (
+                stream_info.get("sessionId") if isinstance(stream_info, dict) else None
+            )
+            session_matches = self._session_matches(msg)
 
             # SDP offer from the crib
             if direction == "publish" and command == "sendOffer":
-                await self._handle_offer(msg)
+                if not session_matches:
+                    log.warning(
+                        "Ignored SDP offer for session %r (active %s)",
+                        received_session_id,
+                        self.session_id,
+                    )
+                elif self._pc is None:
+                    await self._handle_offer(msg)
+                else:
+                    log.warning("Ignored duplicate SDP offer for active session")
             # Fallback: any message with an SDP offer we haven't handled
-            elif (
-                msg.get("sdp", {}).get("type") == "offer"
-                and self._pc is None
-            ):
-                await self._handle_offer(msg)
+            elif msg.get("sdp", {}).get("type") == "offer" and self._pc is None:
+                if session_matches:
+                    await self._handle_offer(msg)
             # ICE candidate from the crib (uses "ice" field)
             elif msg.get("ice"):
-                await self._handle_ice(msg)
+                if session_matches:
+                    await self._handle_ice(msg)
+                else:
+                    log.debug("Ignored ICE candidate for stale session")
             else:
                 log.debug(
                     "MQTT RX (ignored): command=%s direction=%s keys=%s",
-                    command, direction, list(msg.keys()),
+                    command,
+                    direction,
+                    list(msg.keys()),
                 )
 
     # -- Main --
 
     async def run(self):
-        self._loop = asyncio.get_event_loop()
-        self._queue = asyncio.Queue()
+        self._loop = asyncio.get_running_loop()
+        self._queue = asyncio.Queue(maxsize=512)
+        self._fatal_future = self._loop.create_future()
 
-        self._setup_mqtt()
-        log.info(
-            "Connecting to %s:%d (client_id=%s)...",
-            self.ip, MQTT_PORT, self.mqtt_client_id,
-        )
-        self._mqtt.connect(self.ip, MQTT_PORT, keepalive=5)
-        self._mqtt.loop_start()
-
+        message_task = None
+        mqtt_loop_started = False
         try:
-            await self._process_messages()
-        except asyncio.CancelledError:
-            pass
+            self._setup_mqtt()
+            log.info(
+                "Connecting to %s:%d (client_id=%s)...",
+                self.ip,
+                MQTT_PORT,
+                self.mqtt_client_id,
+            )
+            self._mqtt.connect(self.ip, MQTT_PORT, keepalive=5)
+            self._mqtt.loop_start()
+            mqtt_loop_started = True
+            message_task = asyncio.create_task(
+                self._process_messages(), name="cradlewise-signaling"
+            )
+            done, _ = await asyncio.wait(
+                {message_task, self._fatal_future},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if self._fatal_future in done:
+                self._fatal_future.result()
+            message_task.result()
         finally:
             log.info("Shutting down...")
+            self._shutting_down = True
+            if message_task is not None:
+                message_task.cancel()
+                await asyncio.gather(message_task, return_exceptions=True)
+            if self._fatal_future is not None and not self._fatal_future.done():
+                self._fatal_future.cancel()
             if self._keepalive_task:
                 self._keepalive_task.cancel()
+            for task in tuple(self._track_tasks):
+                task.cancel()
+            await asyncio.gather(*self._track_tasks, return_exceptions=True)
             if self._pc:
                 await self._pc.close()
-            self._mqtt.loop_stop()
-            self._mqtt.disconnect()
+                self._pc = None
+            if self._mqtt is not None:
+                self._mqtt.disconnect()
+                if mqtt_loop_started:
+                    self._mqtt.loop_stop()
             if self._ffplay:
                 self._ffplay.terminate()
 
@@ -651,15 +828,19 @@ def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+    def cancel_tasks():
+        for task in asyncio.all_tasks(loop):
+            task.cancel()
+
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(
-            sig, lambda: [t.cancel() for t in asyncio.all_tasks(loop)]
-        )
+        loop.add_signal_handler(sig, cancel_tasks)
 
     try:
         loop.run_until_complete(streamer.run())
+    except asyncio.CancelledError:
+        log.info("Stream stopped by signal")
     except KeyboardInterrupt:
-        pass
+        log.info("Stream interrupted")
     finally:
         loop.close()
 

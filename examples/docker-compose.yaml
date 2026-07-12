@@ -1,30 +1,70 @@
 services:
   cradlewise-mediamtx:
-    image: bluenviron/mediamtx:latest
+    image: bluenviron/mediamtx:1.19.2@sha256:f37aaaf1a707c42b0aff49a3ab5d4fa57a3504ebc3f27657434a820e3b16d730
     container_name: cradlewise-mediamtx
     restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      MTX_AUTHINTERNALUSERS_0_USER: ${CRADLEWISE_RTSP_PUBLISH_USER}
+      MTX_AUTHINTERNALUSERS_0_PASS: ${CRADLEWISE_RTSP_PUBLISH_PASSWORD}
+      MTX_AUTHINTERNALUSERS_1_USER: ${CRADLEWISE_RTSP_READ_USER}
+      MTX_AUTHINTERNALUSERS_1_PASS: ${CRADLEWISE_RTSP_READ_PASSWORD}
     ports:
-      - "8560:8554/tcp"
+      - "${CRADLEWISE_BIND_ADDRESS}:8560:8554/tcp"
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
 
   cradlewise-bridge:
     build:
       context: ..
     container_name: cradlewise-bridge
     restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     env_file:
       - ../.env
+    environment:
+      CRADLEWISE_OUTPUT_URL: >-
+        rtsp://${CRADLEWISE_RTSP_PUBLISH_USER}:${CRADLEWISE_RTSP_PUBLISH_PASSWORD}@cradlewise-mediamtx:8554/cradlewise
     depends_on:
-      - cradlewise-mediamtx
+      cradlewise-mediamtx:
+        condition: service_started
     command:
       - --cradle-id
       - ${CRADLEWISE_CRADLE_ID}
       - --ip
       - ${CRADLEWISE_CRIB_IP}
       - --certs-dir
-      - /certs/${CRADLEWISE_CRADLE_ID}
-      - --output-url
-      - rtsp://cradlewise-mediamtx:8554/cradlewise
+      - /certs
     ports:
-      - "8088:8080/tcp"
+      - "${CRADLEWISE_BIND_ADDRESS}:8088:8080/tcp"
     volumes:
-      - ../certs:/certs:ro
+      - ../certs/${CRADLEWISE_CRADLE_ID}:/certs:ro
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 256
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

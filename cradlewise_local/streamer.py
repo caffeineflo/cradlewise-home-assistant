@@ -10,8 +10,8 @@ import threading
 import time
 from typing import Any
 
-from aiortc.mediastreams import MediaStreamError
 import av
+from aiortc.mediastreams import MediaStreamError
 from av.audio.resampler import AudioResampler
 from paho.mqtt.client import MQTT_ERR_SUCCESS
 
@@ -55,7 +55,12 @@ class BridgeStreamer(CribStreamer):
         status_store: BridgeStatusStore,
     ):
         install_encoded_frame_tap()
-        crib_ip = config.crib_ip or discover_crib_race(config.cradle_id)
+        crib_ip = config.crib_ip or discover_crib_race(
+            config.cradle_id,
+            email=config.cloud_email,
+            password=config.cloud_password,
+            allow_interactive=False,
+        )
         super().__init__(crib_ip, config.cradle_id, config.certs_dir)
         self.config = config
         self.sink = sink
@@ -63,14 +68,24 @@ class BridgeStreamer(CribStreamer):
         self.status_store.crib_ip = crib_ip
         self.beacon_topic = f"/{config.cradle_id}/beacon"
         self.cradle_state_topic = f"/cradle/{config.cradle_id}/cradle_state"
+        self.shadow_get_topic = f"$aws/things/{config.cradle_id}/shadow/get"
+        self.shadow_get_accepted_topic = f"{self.shadow_get_topic}/accepted"
+        self.shadow_get_rejected_topic = f"{self.shadow_get_topic}/rejected"
         self.shadow_update_topic = f"$aws/things/{config.cradle_id}/shadow/update"
+        self.shadow_update_accepted_topic = f"{self.shadow_update_topic}/accepted"
+        self.shadow_update_rejected_topic = f"{self.shadow_update_topic}/rejected"
         self._audio_resampler = AudioResampler(format="s16", layout="mono", rate=48000)
         self._encoded_video_queue: asyncio.Queue[EncodedVideoFrame | None] = (
-            asyncio.Queue()
+            asyncio.Queue(maxsize=120)
         )
         self._snapshot_decoder = av.CodecContext.create("h264", "r")
         self._last_snapshot_update = 0.0
         self._command_lock = threading.Lock()
+        self._shadow_subscription_mids: set[int] = set()
+
+    def _setup_mqtt(self):
+        super()._setup_mqtt()
+        self._mqtt.on_subscribe = self._on_subscribe
 
     def _handle_mqtt_connected(self):
         self.status_store.set_mqtt_connected(True)
@@ -81,28 +96,101 @@ class BridgeStreamer(CribStreamer):
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         super()._on_connect(client, userdata, flags, reason_code, properties)
         if reason_code == 0:
-            client.subscribe(self.beacon_topic)
-            client.subscribe(self.cradle_state_topic)
+            self.status_store.mark_stream_started()
+            result, mid = client.subscribe(
+                [
+                    (self.beacon_topic, 0),
+                    (self.cradle_state_topic, 0),
+                    (self.shadow_get_accepted_topic, 0),
+                    (self.shadow_get_rejected_topic, 0),
+                    (self.shadow_update_accepted_topic, 0),
+                    (self.shadow_update_rejected_topic, 0),
+                ]
+            )
+            if result != MQTT_ERR_SUCCESS:
+                self._signal_fatal_threadsafe(
+                    RuntimeError(f"MQTT state topic subscribe failed with rc={result}")
+                )
+                return
+            self._shadow_subscription_mids.add(mid)
             log.info(
-                "Subscribed to state topics: %s, %s",
+                "Requested state topic subscriptions: %s, %s and shadow responses",
                 self.beacon_topic,
                 self.cradle_state_topic,
             )
 
+    def _on_subscribe(self, client, userdata, mid, reason_code_list, properties):
+        if mid not in self._shadow_subscription_mids:
+            return
+        self._shadow_subscription_mids.discard(mid)
+
+        def rejected(reason_code) -> bool:
+            failure = getattr(reason_code, "is_failure", None)
+            if failure is not None:
+                return bool(failure() if callable(failure) else failure)
+            try:
+                return int(reason_code) >= 128
+            except (TypeError, ValueError):
+                return True
+
+        if any(rejected(reason_code) for reason_code in reason_code_list):
+            self._signal_fatal_threadsafe(
+                RuntimeError("MQTT shadow response topic subscription was rejected")
+            )
+            return
+
+        result = client.publish(
+            self.shadow_get_topic,
+            "{}",
+            qos=0,
+            retain=False,
+        )
+        if result.rc != MQTT_ERR_SUCCESS:
+            self._signal_fatal_threadsafe(
+                RuntimeError(f"MQTT shadow get failed with rc={result.rc}")
+            )
+            return
+        log.info(
+            "Requested current local device shadow after subscription acknowledgement"
+        )
+
     def _on_message(self, client, userdata, message):
         self.status_store.mark_mqtt_message()
         topic = message.topic
-        if topic in {self.beacon_topic, self.cradle_state_topic}:
+        state_topics = {
+            self.beacon_topic,
+            self.cradle_state_topic,
+            self.shadow_get_accepted_topic,
+            self.shadow_update_accepted_topic,
+        }
+        if topic in state_topics:
             try:
                 payload = json.loads(message.payload)
             except json.JSONDecodeError:
                 log.warning("Invalid JSON from %s: %s", topic, message.payload[:100])
                 return
+            if not isinstance(payload, dict):
+                log.warning("Ignored non-object JSON from %s", topic)
+                return
 
             if topic == self.beacon_topic:
                 self.status_store.update_beacon(payload)
-            else:
+            elif topic == self.cradle_state_topic:
                 self.status_store.update_cradle_state(payload)
+            else:
+                self.status_store.update_device_state(payload, source="local_shadow")
+            return
+
+        if topic in {
+            self.shadow_get_rejected_topic,
+            self.shadow_update_rejected_topic,
+        }:
+            self.status_store.mark_device_state_error(
+                "local_shadow", message.payload[:200].decode(errors="replace")
+            )
+            log.warning(
+                "Local device shadow request rejected: %s", message.payload[:200]
+            )
             return
 
         super()._on_message(client, userdata, message)
@@ -123,7 +211,7 @@ class BridgeStreamer(CribStreamer):
     async def _handle_track(self, track):
         if track.kind == "audio":
             self.status_store.mark_audio_track()
-            asyncio.ensure_future(self._consume_audio(track))
+            await self._consume_audio(track)
             return
         await super()._handle_track(track)
 
@@ -165,6 +253,7 @@ class BridgeStreamer(CribStreamer):
     async def _consume_video(self, track):
         log.info("Waiting for first H.264 keyframe...")
         sink_started = False
+        awaiting_sync_point = True
         self._frame_count = 0
 
         try:
@@ -173,23 +262,39 @@ class BridgeStreamer(CribStreamer):
                 if encoded_frame is None:
                     raise MediaStreamError
 
-                if not sink_started:
+                if encoded_frame.discontinuity:
+                    awaiting_sync_point = True
+                    log.warning(
+                        "Encoded video backlog dropped; waiting for a new keyframe"
+                    )
+
+                if awaiting_sync_point:
                     if not self._is_h264_sync_point(encoded_frame.data):
                         continue
-                    self.sink.start_h264()
-                    sink_started = True
-                    self.status_store.set_webrtc_state("connected")
-                    self.status_store.set_ice_state("completed")
-                    log.info("H.264 passthrough started")
+                    awaiting_sync_point = False
+                    if not sink_started:
+                        self.sink.start_h264()
+                        sink_started = True
+                        self.status_store.update_sink_health(
+                            self.sink.health_snapshot()
+                        )
+                        self.status_store.set_webrtc_state("connected")
+                        self.status_store.set_ice_state("completed")
+                        log.info("H.264 passthrough started")
 
                 self.sink.write_h264(encoded_frame.data)
+                self.status_store.update_sink_health(self.sink.health_snapshot())
                 self._frame_count += 1
                 self.status_store.increment_video_frames()
                 self._decode_for_snapshot(encoded_frame.data)
                 if self._frame_count % 300 == 0:
                     log.info("Frames bridged: %d", self._frame_count)
-        except (asyncio.CancelledError, MediaStreamError):
+        except asyncio.CancelledError:
             log.info("Video bridge stopped")
+            raise
+        except MediaStreamError as exc:
+            log.info("Video bridge stopped")
+            raise RuntimeError("crib video track ended") from exc
         except Exception as exc:
             log.error("Video bridge stopped: %s", exc)
             raise
@@ -205,10 +310,18 @@ class BridgeStreamer(CribStreamer):
                 if self.config.enable_audio:
                     for resampled in self._audio_resampler.resample(frame):
                         self.sink.write_audio(bytes(resampled.planes[0]))
-        except (asyncio.CancelledError, MediaStreamError):
+                        self.status_store.update_sink_health(
+                            self.sink.health_snapshot()
+                        )
+        except asyncio.CancelledError:
             log.info("Audio bridge stopped")
+            raise
+        except MediaStreamError as exc:
+            log.info("Audio bridge stopped")
+            raise RuntimeError("crib audio track ended") from exc
         except Exception as exc:
             log.warning("Audio bridge stopped: %s", exc)
+            raise
 
 
 async def run_bridge(

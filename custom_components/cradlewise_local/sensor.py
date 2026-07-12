@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -10,16 +11,65 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_NAME, UnitOfTemperature, UnitOfTime
+from homeassistant.const import (
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
+    UnitOfTemperature,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_CRADLE_ID, DOMAIN
-from .status_helpers import path_value
+from . import CradlewiseConfigEntry
+from .coordinator import CradlewiseStatusCoordinator
+from .entity import (
+    CRADLE_STATE_FRESHNESS,
+    DEVICE_STATE_FRESHNESS,
+    CradlewiseCoordinatorEntity,
+)
+from .status_helpers import bounded_number, nonnegative_int, path_value, positive_int
+
+
+def _identity(value: Any) -> Any:
+    return value
+
+
+def _nonempty_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _timestamp(value: Any) -> datetime | None:
+    parsed = bounded_number(value, minimum=0)
+    if parsed is None:
+        return None
+    return datetime.fromtimestamp(parsed, tz=UTC)
+
+
+def _temperature(value: Any) -> float | None:
+    return bounded_number(value, minimum=-50, maximum=80)
+
+
+def _signal_strength(value: Any) -> int | None:
+    parsed = bounded_number(value, minimum=-200, maximum=0)
+    if parsed is None or not parsed.is_integer():
+        return None
+    return int(parsed)
+
+
+def _breath_state(value: Any) -> str | None:
+    parsed = nonnegative_int(value)
+    return {
+        0: "idle",
+        1: "measuring",
+        2: "valid",
+        3: "invalid",
+        4: "not_measuring",
+    }.get(parsed)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -27,696 +77,343 @@ class CradlewiseSensorDescription(SensorEntityDescription):
     """Description for a bridge status sensor."""
 
     path: tuple[str, ...]
+    value_fn: Callable[[Any], Any] = _identity
+    freshness_paths: tuple[tuple[str, ...], ...] = DEVICE_STATE_FRESHNESS
+
+
+def _diagnostic(
+    *,
+    key: str,
+    path: tuple[str, ...],
+    value_fn: Callable[[Any], Any] = _identity,
+    freshness_paths: tuple[tuple[str, ...], ...] = DEVICE_STATE_FRESHNESS,
+    **kwargs: Any,
+) -> CradlewiseSensorDescription:
+    return CradlewiseSensorDescription(
+        key=key,
+        translation_key=key,
+        path=path,
+        value_fn=value_fn,
+        freshness_paths=freshness_paths,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        **kwargs,
+    )
 
 
 SENSORS: tuple[CradlewiseSensorDescription, ...] = (
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="webrtc_connection_state",
-        name="WebRTC Connection State",
         path=("webrtc", "connection_state"),
+        value_fn=_nonempty_string,
+        freshness_paths=(),
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="ice_connection_state",
-        name="ICE Connection State",
         path=("webrtc", "ice_connection_state"),
+        value_fn=_nonempty_string,
+        freshness_paths=(),
     ),
-    CradlewiseSensorDescription(
-        key="video_frames",
-        name="Video Frames",
-        path=("media", "video_frames"),
-    ),
-    CradlewiseSensorDescription(
-        key="audio_frames",
-        name="Audio Frames",
-        path=("media", "audio_frames"),
-    ),
-    CradlewiseSensorDescription(
-        key="resolution",
-        name="Resolution",
-        path=("media", "resolution"),
-    ),
-    CradlewiseSensorDescription(
-        key="uptime",
-        name="Bridge Uptime",
-        path=("bridge", "uptime_seconds"),
-        native_unit_of_measurement=UnitOfTime.SECONDS,
-    ),
-    CradlewiseSensorDescription(
-        key="cradle_state",
-        name="Cradle State",
-        path=("cradle_state", "state"),
-    ),
-    CradlewiseSensorDescription(
-        key="cradle_op_mode",
-        name="Cradle Op Mode",
-        path=("cradle_state", "op_mode"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="wifi_strength",
-        name="WiFi Strength",
         path=("cradle_state", "wifi_strength"),
-        native_unit_of_measurement="dBm",
+        value_fn=_signal_strength,
+        freshness_paths=CRADLE_STATE_FRESHNESS,
+        native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="wifi_ssid",
-        name="WiFi SSID",
         path=("cradle_state", "wifi_ssid"),
+        value_fn=_nonempty_string,
+        freshness_paths=CRADLE_STATE_FRESHNESS,
     ),
-    CradlewiseSensorDescription(
-        key="local_ip",
-        name="Local IP",
-        path=("cradle_state", "local_ip"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="device_state_source",
-        name="Device State Source",
         path=("device_state", "source"),
+        value_fn=_nonempty_string,
+        freshness_paths=(),
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="device_state_updated_at",
-        name="Device State Updated At",
         path=("device_state", "updated_at"),
+        value_fn=_timestamp,
+        freshness_paths=(),
         device_class=SensorDeviceClass.TIMESTAMP,
     ),
     CradlewiseSensorDescription(
         key="sleep_state",
-        name="Sleep State",
+        translation_key="sleep_state",
         path=("device_state", "sleep_state"),
+        value_fn=_nonempty_string,
     ),
     CradlewiseSensorDescription(
         key="sleep_phase",
-        name="Sleep Phase",
+        translation_key="sleep_phase",
         path=("device_state", "sleep_phase"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="sleep_phase_raw",
-        name="Sleep Phase Raw",
         path=("device_state", "sleep_phase_raw"),
+        value_fn=nonnegative_int,
     ),
-    CradlewiseSensorDescription(
-        key="sleep_event",
-        name="Sleep Event",
-        path=("device_state", "sleep_event"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="sleep_state_raw",
-        name="Sleep State Raw",
         path=("device_state", "sleep_state_raw"),
+        value_fn=nonnegative_int,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="sleep_state_internal",
-        name="Sleep State Internal",
         path=("device_state", "sleep_state_internal"),
+        value_fn=nonnegative_int,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="sleep_phase_event_start_time",
-        name="Sleep Phase Event Start Time",
         path=("device_state", "sleep_phase_event_start_time"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="sleep_phase_duration_start_time",
-        name="Sleep Phase Duration Start Time",
         path=("device_state", "sleep_phase_duration_start_time"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="sleep_phase_present_toggle_time",
-        name="Sleep Phase Present Toggle Time",
         path=("device_state", "sleep_phase_present_toggle_time"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="cradle_mode",
-        name="Cradle Mode",
         path=("device_state", "cradle_mode"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
-        key="bounce_mode",
-        name="Bounce Mode",
-        path=("device_state", "bounce_mode"),
-    ),
-    CradlewiseSensorDescription(
-        key="bounce_setting",
-        name="Bounce Setting",
-        path=("device_state", "bounce_setting"),
-    ),
-    CradlewiseSensorDescription(
-        key="bounce_amplitude",
-        name="Bounce Amplitude",
-        path=("device_state", "bounce_amplitude"),
-    ),
-    CradlewiseSensorDescription(
-        key="bounce_level",
-        name="Bounce Level",
-        path=("device_state", "bounce_level"),
-    ),
-    CradlewiseSensorDescription(
-        key="bounce_always_on_intensity",
-        name="Bounce Always On Intensity",
-        path=("device_state", "bounce_always_on_intensity"),
-    ),
-    CradlewiseSensorDescription(
-        key="bounce_duration",
-        name="Bounce Duration",
-        path=("device_state", "bounce_duration"),
-        native_unit_of_measurement=UnitOfTime.MINUTES,
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="bounce_duration_limit",
-        name="Bounce Duration Limit",
         path=("device_state", "bounce_duration_limit"),
+        value_fn=nonnegative_int,
         native_unit_of_measurement=UnitOfTime.MINUTES,
+        device_class=SensorDeviceClass.DURATION,
     ),
     CradlewiseSensorDescription(
         key="bounce_time_remaining",
-        name="Bounce Time Remaining",
+        translation_key="bounce_time_remaining",
         path=("device_state", "bounce_time_remaining"),
+        value_fn=nonnegative_int,
         native_unit_of_measurement=UnitOfTime.MINUTES,
+        device_class=SensorDeviceClass.DURATION,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="bounce_tilt_state",
-        name="Bounce Tilt State",
         path=("device_state", "bounce_tilt_state"),
-    ),
-    CradlewiseSensorDescription(
-        key="bounce_movement_energy_threshold",
-        name="Bounce Movement Energy Threshold",
-        path=("device_state", "bounce_movement_energy_threshold"),
-    ),
-    CradlewiseSensorDescription(
-        key="bounce_acc_frame_peaks_threshold",
-        name="Bounce Acc Frame Peaks Threshold",
-        path=("device_state", "bounce_acc_frame_peaks_threshold"),
-    ),
-    CradlewiseSensorDescription(
-        key="responsivity_setting",
-        name="Responsivity Setting",
-        path=("device_state", "responsivity_setting"),
+        value_fn=nonnegative_int,
     ),
     CradlewiseSensorDescription(
         key="music_mood",
-        name="Music Mood",
+        translation_key="music_mood",
         path=("device_state", "music_mood"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
-        key="music_volume",
-        name="Music Volume",
-        path=("device_state", "music_volume"),
-    ),
-    CradlewiseSensorDescription(
-        key="music_level",
-        name="Sound Level",
-        path=("device_state", "music_level"),
-    ),
-    CradlewiseSensorDescription(
-        key="music_mode",
-        name="Music Mode",
-        path=("device_state", "music_mode"),
-    ),
-    CradlewiseSensorDescription(
-        key="volume_profile",
-        name="Volume Profile",
-        path=("device_state", "volume_profile"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="sound_ambience",
-        name="Sound Ambience",
         path=("device_state", "sound_ambience"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
-        key="sound_ambience_raw",
-        name="Sound Ambience Raw",
-        path=("device_state", "sound_ambience_raw"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="sound_color",
-        name="Sound Color",
         path=("device_state", "sound_color"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
-        key="sound_color_raw",
-        name="Sound Color Raw",
-        path=("device_state", "sound_color_raw"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="sound_heartbeat_volume",
-        name="Sound Heartbeat Volume",
         path=("device_state", "sound_heartbeat_volume"),
+        value_fn=nonnegative_int,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="sound_breath_volume",
-        name="Sound Breath Volume",
         path=("device_state", "sound_breath_volume"),
+        value_fn=nonnegative_int,
     ),
-    CradlewiseSensorDescription(
-        key="lullabies_action",
-        name="Lullabies Action",
-        path=("device_state", "lullabies_action"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="lullabies_current_song_id",
-        name="Lullabies Current Song ID",
         path=("device_state", "lullabies_current_song_id"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="lullabies_desired_playlist_id",
-        name="Lullabies Desired Playlist ID",
         path=("device_state", "lullabies_desired_playlist_id"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="lullabies_desired_song_id",
-        name="Lullabies Desired Song ID",
         path=("device_state", "lullabies_desired_song_id"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="lullabies_elapsed_time",
-        name="Lullabies Elapsed Time",
         path=("device_state", "lullabies_elapsed_time"),
+        value_fn=nonnegative_int,
         native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="lullabies_loop",
-        name="Lullabies Loop",
         path=("device_state", "lullabies_loop"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="lullabies_timer_duration",
-        name="Lullabies Timer Duration",
         path=("device_state", "lullabies_timer_duration"),
+        value_fn=nonnegative_int,
         native_unit_of_measurement=UnitOfTime.MINUTES,
-    ),
-    CradlewiseSensorDescription(
-        key="lullabies_volume",
-        name="Lullabies Volume",
-        path=("device_state", "lullabies_volume"),
-    ),
-    CradlewiseSensorDescription(
-        key="music_duration",
-        name="Music Duration",
-        path=("device_state", "music_duration"),
-        native_unit_of_measurement=UnitOfTime.MINUTES,
+        device_class=SensorDeviceClass.DURATION,
     ),
     CradlewiseSensorDescription(
         key="music_time_remaining",
-        name="Music Time Remaining",
+        translation_key="music_time_remaining",
         path=("device_state", "music_time_remaining"),
+        value_fn=nonnegative_int,
         native_unit_of_measurement=UnitOfTime.MINUTES,
-    ),
-    CradlewiseSensorDescription(
-        key="light_intensity",
-        name="Light Intensity",
-        path=("device_state", "light_intensity"),
-    ),
-    CradlewiseSensorDescription(
-        key="battery_life",
-        name="Battery Life",
-        path=("device_state", "battery_life"),
+        device_class=SensorDeviceClass.DURATION,
     ),
     CradlewiseSensorDescription(
         key="ambient_temperature",
-        name="Ambient Temperature",
+        translation_key="ambient_temperature",
         path=("device_state", "ambient_temperature"),
+        value_fn=_temperature,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
-    CradlewiseSensorDescription(
-        key="device_uptime_service",
-        name="Device Service Uptime",
-        path=("device_state", "device_uptime_service"),
-        native_unit_of_measurement=UnitOfTime.SECONDS,
-    ),
-    CradlewiseSensorDescription(
-        key="device_uptime_total",
-        name="Device Total Uptime",
-        path=("device_state", "device_uptime_total"),
-        native_unit_of_measurement=UnitOfTime.SECONDS,
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="operation_state",
-        name="Operation State",
         path=("device_state", "operation_state"),
+        value_fn=nonnegative_int,
     ),
-    CradlewiseSensorDescription(
-        key="reported_state",
-        name="Reported State",
-        path=("device_state", "reported_state"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="deploy_state",
-        name="Deploy State",
         path=("device_state", "deploy_state"),
+        value_fn=nonnegative_int,
     ),
-    CradlewiseSensorDescription(
-        key="sequence_id",
-        name="Sequence ID",
-        path=("device_state", "sequence_id"),
-    ),
-    CradlewiseSensorDescription(
-        key="report_wrong_status",
-        name="Report Wrong Status",
-        path=("device_state", "report_wrong_status"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="calibrate_cradle",
-        name="Calibrate Cradle",
         path=("device_state", "calibrate_cradle"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
-        key="calibrate_cradle_raw",
-        name="Calibrate Cradle Raw",
-        path=("device_state", "calibrate_cradle_raw"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="calibration_type",
-        name="Calibration Type",
         path=("device_state", "calibration_type"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
-        key="calibration_type_raw",
-        name="Calibration Type Raw",
-        path=("device_state", "calibration_type_raw"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="calibration_stage",
-        name="Calibration Stage",
         path=("device_state", "calibration_stage"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="calibration_status",
-        name="Calibration Status",
         path=("device_state", "calibration_status"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
-        key="calibration_history_complete",
-        name="Calibration History Complete",
-        path=("device_state", "calibration_history_complete"),
-    ),
-    CradlewiseSensorDescription(
-        key="calibration_history_gain_setup",
-        name="Calibration History Gain Setup",
-        path=("device_state", "calibration_history_gain_setup"),
-    ),
-    CradlewiseSensorDescription(
-        key="calibration_history_mic_setup",
-        name="Calibration History Mic Setup",
-        path=("device_state", "calibration_history_mic_setup"),
-    ),
-    CradlewiseSensorDescription(
-        key="calibration_history_noise_profile_setup",
-        name="Calibration History Noise Profile Setup",
-        path=("device_state", "calibration_history_noise_profile_setup"),
-    ),
-    CradlewiseSensorDescription(
-        key="calibration_history_tof_calibration",
-        name="Calibration History ToF Calibration",
-        path=("device_state", "calibration_history_tof_calibration"),
-    ),
-    CradlewiseSensorDescription(
-        key="calibration_history_weight_calibration",
-        name="Calibration History Weight Calibration",
-        path=("device_state", "calibration_history_weight_calibration"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="user_action_for_obstruction",
-        name="User Action For Obstruction",
         path=("device_state", "user_action_for_obstruction"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
-        key="cradle_mode_to_calibrate",
-        name="Cradle Mode To Calibrate",
-        path=("device_state", "cradle_mode_to_calibrate"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="wifi_score",
-        name="WiFi Score",
         path=("device_state", "wifi_score"),
+        value_fn=nonnegative_int,
     ),
-    CradlewiseSensorDescription(
-        key="wifi_score_snr",
-        name="WiFi SNR Score",
-        path=("device_state", "wifi_score_snr"),
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_score_speed",
-        name="WiFi Speed Score",
-        path=("device_state", "wifi_score_speed"),
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_score_loss",
-        name="WiFi Loss Score",
-        path=("device_state", "wifi_score_loss"),
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_score_jitter",
-        name="WiFi Jitter Score",
-        path=("device_state", "wifi_score_jitter"),
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_stats_strength",
-        name="WiFi Stats Strength",
-        path=("device_state", "wifi_stats_strength"),
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_stats_rssi0",
-        name="WiFi Stats RSSI 0",
-        path=("device_state", "wifi_stats_rssi0"),
-        native_unit_of_measurement="dBm",
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_stats_rssi1",
-        name="WiFi Stats RSSI 1",
-        path=("device_state", "wifi_stats_rssi1"),
-        native_unit_of_measurement="dBm",
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_stats_noise",
-        name="WiFi Stats Noise",
-        path=("device_state", "wifi_stats_noise"),
-        native_unit_of_measurement="dBm",
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_stats_bitrate",
-        name="WiFi Stats Bitrate",
-        path=("device_state", "wifi_stats_bitrate"),
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_stats_ssid",
-        name="WiFi Stats SSID",
-        path=("device_state", "wifi_stats_ssid"),
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_stats_arp_success_count",
-        name="WiFi Stats ARP Success Count",
-        path=("device_state", "wifi_stats_arp_success_count"),
-    ),
-    CradlewiseSensorDescription(
-        key="wifi_stats_beacon_loss_count",
-        name="WiFi Stats Beacon Loss Count",
-        path=("device_state", "wifi_stats_beacon_loss_count"),
-    ),
-    CradlewiseSensorDescription(
-        key="software_version",
-        name="Software Version",
-        path=("device_state", "software_version"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="rootfs_version",
-        name="RootFS Version",
         path=("device_state", "rootfs_version"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="shadow_version",
-        name="Shadow Version",
         path=("device_state", "shadow_version"),
+        value_fn=nonnegative_int,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="cradle_timezone",
-        name="Cradle Timezone",
         path=("device_state", "cradle_timezone"),
-    ),
-    CradlewiseSensorDescription(
-        key="baby_profile_last_updated_time",
-        name="Baby Profile Last Updated Time",
-        path=("device_state", "baby_profile_last_updated_time"),
-    ),
-    CradlewiseSensorDescription(
-        key="update_status",
-        name="Update Status",
-        path=("device_state", "update_status"),
-    ),
-    CradlewiseSensorDescription(
-        key="update_step",
-        name="Update Step",
-        path=("device_state", "update_step"),
-    ),
-    CradlewiseSensorDescription(
-        key="update_version",
-        name="Update Version",
-        path=("device_state", "update_version"),
-    ),
-    CradlewiseSensorDescription(
-        key="update_progress",
-        name="Update Progress",
-        path=("device_state", "update_progress"),
-    ),
-    CradlewiseSensorDescription(
-        key="update_type",
-        name="Update Type",
-        path=("device_state", "update_type"),
-    ),
-    CradlewiseSensorDescription(
-        key="update_error_reason",
-        name="Update Error Reason",
-        path=("device_state", "update_error_reason"),
-    ),
-    CradlewiseSensorDescription(
-        key="control_bna_alert_control",
-        name="Control BNA Alert Control",
-        path=("device_state", "control_bna_alert_control"),
-    ),
-    CradlewiseSensorDescription(
-        key="control_cry_sensitivity",
-        name="Control Cry Sensitivity",
-        path=("device_state", "control_cry_sensitivity"),
-    ),
-    CradlewiseSensorDescription(
-        key="control_css_responsiveness",
-        name="Control CSS Responsiveness",
-        path=("device_state", "control_css_responsiveness"),
-    ),
-    CradlewiseSensorDescription(
-        key="control_video_service_bit_mask",
-        name="Control Video Service Bit Mask",
-        path=("device_state", "control_video_service_bit_mask"),
+        value_fn=_nonempty_string,
     ),
     CradlewiseSensorDescription(
         key="breath_rate",
-        name="Breath Rate",
+        translation_key="breath_rate",
         path=("device_state", "breath_rate"),
+        value_fn=positive_int,
+        native_unit_of_measurement="breaths/min",
+        state_class=SensorStateClass.MEASUREMENT,
     ),
-    CradlewiseSensorDescription(
-        key="breath_final_rate",
-        name="Breath Final Rate",
-        path=("device_state", "breath_final_rate"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="breath_state",
-        name="Breath State",
         path=("device_state", "breath_state"),
+        value_fn=_breath_state,
     ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="breath_reason",
-        name="Breath Reason",
         path=("device_state", "breath_reason"),
+        value_fn=nonnegative_int,
     ),
-    CradlewiseSensorDescription(
-        key="keep_bounce_on_during_sleep_level",
-        name="Keep Bounce On During Sleep Level",
-        path=("device_state", "keep_bounce_on_during_sleep_level"),
-    ),
-    CradlewiseSensorDescription(
-        key="keep_music_on_during_sleep_level",
-        name="Keep Music On During Sleep Level",
-        path=("device_state", "keep_music_on_during_sleep_level"),
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="auto_mode_lock_end_time",
-        name="Auto Mode Lock End Time",
         path=("device_state", "auto_mode_lock_end_time"),
+        value_fn=_nonempty_string,
     ),
-    CradlewiseSensorDescription(
-        key="auto_mode_lock_duration",
-        name="Auto Mode Lock Duration",
-        path=("device_state", "auto_mode_lock_duration"),
-        native_unit_of_measurement=UnitOfTime.MINUTES,
-    ),
-    CradlewiseSensorDescription(
+    _diagnostic(
         key="start_recipe_lock_end_time",
-        name="Start Recipe Lock End Time",
         path=("device_state", "start_recipe_lock_end_time"),
-    ),
-    CradlewiseSensorDescription(
-        key="start_recipe_lock_duration",
-        name="Start Recipe Lock Duration",
-        path=("device_state", "start_recipe_lock_duration"),
-        native_unit_of_measurement=UnitOfTime.MINUTES,
-    ),
-    CradlewiseSensorDescription(
-        key="start_recipe_bounce_level",
-        name="Start Recipe Bounce Level",
-        path=("device_state", "start_recipe_bounce_level"),
-    ),
-    CradlewiseSensorDescription(
-        key="start_recipe_music_level",
-        name="Start Recipe Music Level",
-        path=("device_state", "start_recipe_music_level"),
-    ),
-    CradlewiseSensorDescription(
-        key="max_bounce_limit",
-        name="Max Bounce Limit",
-        path=("device_state", "max_bounce_limit"),
-    ),
-    CradlewiseSensorDescription(
-        key="max_volume_limit",
-        name="Max Volume Limit",
-        path=("device_state", "max_volume_limit"),
-    ),
-    CradlewiseSensorDescription(
-        key="sleep_time",
-        name="Sleep Time",
-        path=("device_state", "sleep_time"),
-    ),
-    CradlewiseSensorDescription(
-        key="wake_up_time",
-        name="Wake Up Time",
-        path=("device_state", "wake_up_time"),
+        value_fn=_nonempty_string,
     ),
 )
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CradlewiseConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Cradlewise status sensors."""
-    coordinator = hass.data[DOMAIN][entry.entry_id].get("coordinator")
+    coordinator = entry.runtime_data.coordinator
     if coordinator is None:
         return
-
     async_add_entities(
         CradlewiseStatusSensor(entry, coordinator, description)
         for description in SENSORS
     )
 
 
-class CradlewiseStatusSensor(CoordinatorEntity, SensorEntity):
+class CradlewiseStatusSensor(CradlewiseCoordinatorEntity, SensorEntity):
     """Sensor backed by the bridge status API."""
 
-    _attr_has_entity_name = True
+    entity_description: CradlewiseSensorDescription
 
     def __init__(
         self,
-        entry: ConfigEntry,
-        coordinator,
+        entry: CradlewiseConfigEntry,
+        coordinator: CradlewiseStatusCoordinator,
         description: CradlewiseSensorDescription,
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(entry, coordinator, description.key)
         self.entity_description = description
-        self._entry = entry
-        self._cradle_id = entry.data[CONF_CRADLE_ID]
-        self._attr_name = description.name
-        self._attr_unique_id = f"{self._cradle_id}_{description.key}"
-        self._attr_native_unit_of_measurement = description.native_unit_of_measurement
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._cradle_id)},
-            manufacturer="Cradlewise",
-            name=entry.data.get(CONF_NAME, "Cradlewise Local"),
+
+    @property
+    def available(self) -> bool:
+        """Return availability with freshness for device-backed state."""
+        return (
+            super().available
+            and (
+                not self.entity_description.freshness_paths
+                or self._fresh(self.entity_description.freshness_paths)
+            )
+            and self.native_value is not None
         )
 
     @property
     def native_value(self) -> Any:
         value = path_value(self.coordinator.data, self.entity_description.path)
-        if (
-            self.entity_description.device_class == SensorDeviceClass.TIMESTAMP
-            and isinstance(value, int | float)
-        ):
-            return datetime.fromtimestamp(value, tz=UTC)
-        return value
+        return self.entity_description.value_fn(value)

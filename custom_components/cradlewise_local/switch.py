@@ -6,15 +6,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_NAME
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_CRADLE_ID, DOMAIN
-from .status_helpers import path_value
+from . import CradlewiseConfigEntry
+from .coordinator import CradlewiseStatusCoordinator
+from .entity import DEVICE_STATE_FRESHNESS, CradlewiseCoordinatorEntity
+from .status_helpers import path_value, strict_bool
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -25,76 +24,84 @@ class CradlewiseSwitchDescription(SwitchEntityDescription):
     command: str
 
 
+def _config_switch(**kwargs: Any) -> CradlewiseSwitchDescription:
+    return CradlewiseSwitchDescription(
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        **kwargs,
+    )
+
+
 SWITCHES: tuple[CradlewiseSwitchDescription, ...] = (
     CradlewiseSwitchDescription(
         key="actuator_on",
-        name="Bounce",
+        translation_key="actuator_on",
         path=("device_state", "bouncing"),
         command="actuator_on",
     ),
-    CradlewiseSwitchDescription(
+    _config_switch(
         key="disable_bounce",
-        name="Disable Bounce",
+        translation_key="disable_bounce",
         path=("device_state", "bounce_disabled"),
         command="disable_bounce",
     ),
-    CradlewiseSwitchDescription(
+    _config_switch(
         key="super_gentle_bounce",
-        name="Super Gentle Bounce",
+        translation_key="super_gentle_bounce",
         path=("device_state", "bounce_super_gentle"),
         command="super_gentle_bounce",
     ),
-    CradlewiseSwitchDescription(
+    _config_switch(
         key="always_on_bounce",
-        name="Always On Bounce",
+        translation_key="always_on_bounce",
         path=("device_state", "bounce_always_on"),
         command="always_on_bounce",
     ),
-    CradlewiseSwitchDescription(
+    _config_switch(
         key="tap_detection_enabled",
-        name="Tap Detection",
+        translation_key="tap_detection_enabled",
         path=("device_state", "bounce_tap_detection_enabled"),
         command="tap_detection_enabled",
     ),
-    CradlewiseSwitchDescription(
+    _config_switch(
         key="push_gesture_enabled",
-        name="Push Gesture",
+        translation_key="push_gesture_enabled",
         path=("device_state", "bounce_push_gesture_enabled"),
         command="push_gesture_enabled",
     ),
     CradlewiseSwitchDescription(
         key="music_playing",
-        name="Music",
+        translation_key="music_playing",
         path=("device_state", "music_playing"),
         command="music_playing",
     ),
-    CradlewiseSwitchDescription(
+    _config_switch(
         key="keep_music_on_during_sleep",
-        name="Keep Music On During Sleep",
+        translation_key="keep_music_on_during_sleep",
         path=("device_state", "keep_music_on_during_sleep"),
         command="keep_music_on_during_sleep",
     ),
-    CradlewiseSwitchDescription(
+    _config_switch(
         key="keep_bounce_on_during_sleep",
-        name="Keep Bounce On During Sleep",
+        translation_key="keep_bounce_on_during_sleep",
         path=("device_state", "keep_bounce_on_during_sleep"),
         command="keep_bounce_on_during_sleep",
     ),
-    CradlewiseSwitchDescription(
+    _config_switch(
         key="auto_mode_lock_on",
-        name="Auto Mode Lock",
+        translation_key="auto_mode_lock_on",
         path=("device_state", "auto_mode_lock_on"),
         command="auto_mode_lock_on",
     ),
-    CradlewiseSwitchDescription(
+    _config_switch(
         key="start_recipe_enabled",
-        name="Start Recipe Enabled",
+        translation_key="start_recipe_enabled",
         path=("device_state", "start_recipe_enabled"),
         command="start_recipe_enabled",
     ),
     CradlewiseSwitchDescription(
         key="adaptive_soothing_enabled",
-        name="Adaptive Soothing",
+        translation_key="adaptive_soothing_enabled",
         path=("device_state", "control_adaptive_soothing_enabled"),
         command="adaptive_soothing_enabled",
     ),
@@ -103,48 +110,48 @@ SWITCHES: tuple[CradlewiseSwitchDescription, ...] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CradlewiseConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Cradlewise writable switches."""
-    coordinator = hass.data[DOMAIN][entry.entry_id].get("coordinator")
+    coordinator = entry.runtime_data.coordinator
     if coordinator is None:
         return
-
     async_add_entities(
         CradlewiseBridgeSwitch(entry, coordinator, description)
         for description in SWITCHES
     )
 
 
-class CradlewiseBridgeSwitch(CoordinatorEntity, SwitchEntity):
+class CradlewiseBridgeSwitch(CradlewiseCoordinatorEntity, SwitchEntity):
     """Switch backed by the bridge command API."""
 
-    _attr_has_entity_name = True
+    entity_description: CradlewiseSwitchDescription
 
     def __init__(
         self,
-        entry: ConfigEntry,
-        coordinator,
+        entry: CradlewiseConfigEntry,
+        coordinator: CradlewiseStatusCoordinator,
         description: CradlewiseSwitchDescription,
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(entry, coordinator, description.key)
         self.entity_description = description
-        self._cradle_id = entry.data[CONF_CRADLE_ID]
-        self._attr_name = description.name
-        self._attr_unique_id = f"{self._cradle_id}_{description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._cradle_id)},
-            manufacturer="Cradlewise",
-            name=entry.data.get(CONF_NAME, "Cradlewise Local"),
+
+    @property
+    def available(self) -> bool:
+        """Require current state and an active MQTT publisher for controls."""
+        return (
+            super().available
+            and self._fresh(DEVICE_STATE_FRESHNESS)
+            and strict_bool(path_value(self.coordinator.data, ("mqtt", "connected")))
+            is True
+            and self.is_on is not None
         )
 
     @property
     def is_on(self) -> bool | None:
         value: Any = path_value(self.coordinator.data, self.entity_description.path)
-        if value is None:
-            return None
-        return bool(value)
+        return strict_bool(value)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
@@ -152,4 +159,6 @@ class CradlewiseBridgeSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
-        await self.coordinator.async_send_command(self.entity_description.command, False)
+        await self.coordinator.async_send_command(
+            self.entity_description.command, False
+        )

@@ -16,6 +16,32 @@ class EncodedVideoFrame:
 
     data: bytes
     timestamp: int
+    discontinuity: bool = False
+
+
+def _offer_encoded_frame(
+    encoded_queue: asyncio.Queue[EncodedVideoFrame | None],
+    frame: EncodedVideoFrame | None,
+) -> None:
+    """Bound pending encoded media and mark recovery after dropped frames."""
+    try:
+        encoded_queue.put_nowait(frame)
+        return
+    except asyncio.QueueFull:
+        pass
+
+    while True:
+        try:
+            encoded_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+    if frame is not None:
+        frame = EncodedVideoFrame(
+            data=frame.data,
+            timestamp=frame.timestamp,
+            discontinuity=True,
+        )
+    encoded_queue.put_nowait(frame)
 
 
 def install_encoded_frame_tap() -> None:
@@ -36,7 +62,7 @@ def install_encoded_frame_tap() -> None:
             encoded_queue = getattr(output_q, "encoded_passthrough_queue", None)
             if task is None:
                 if encoded_queue is not None:
-                    asyncio.run_coroutine_threadsafe(encoded_queue.put(None), loop)
+                    loop.call_soon_threadsafe(_offer_encoded_frame, encoded_queue, None)
                 asyncio.run_coroutine_threadsafe(output_q.put(None), loop)
                 break
 
@@ -46,7 +72,7 @@ def install_encoded_frame_tap() -> None:
                     data=bytes(encoded_frame.data),
                     timestamp=encoded_frame.timestamp,
                 )
-                asyncio.run_coroutine_threadsafe(encoded_queue.put(frame), loop)
+                loop.call_soon_threadsafe(_offer_encoded_frame, encoded_queue, frame)
                 continue
 
             if codec.name != codec_name:

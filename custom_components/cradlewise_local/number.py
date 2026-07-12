@@ -10,15 +10,14 @@ from homeassistant.components.number import (
     NumberEntityDescription,
     NumberMode,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_NAME
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_CRADLE_ID, DOMAIN
-from .status_helpers import path_value
+from . import CradlewiseConfigEntry
+from .coordinator import CradlewiseStatusCoordinator
+from .entity import DEVICE_STATE_FRESHNESS, CradlewiseCoordinatorEntity
+from .status_helpers import bounded_number, path_value, strict_bool
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -27,12 +26,21 @@ class CradlewiseNumberDescription(NumberEntityDescription):
 
     path: tuple[str, ...]
     command: str
+    limit_path: tuple[str, ...] | None = None
+
+
+def _config_number(**kwargs: Any) -> CradlewiseNumberDescription:
+    return CradlewiseNumberDescription(
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        **kwargs,
+    )
 
 
 NUMBERS: tuple[CradlewiseNumberDescription, ...] = (
     CradlewiseNumberDescription(
         key="bounce_level",
-        name="Bounce Level",
+        translation_key="bounce_level",
         path=("device_state", "bounce_level"),
         command="bounce_level",
         native_min_value=0,
@@ -42,7 +50,7 @@ NUMBERS: tuple[CradlewiseNumberDescription, ...] = (
     ),
     CradlewiseNumberDescription(
         key="music_level",
-        name="Sound Level",
+        translation_key="music_level",
         path=("device_state", "music_level"),
         command="music_level",
         native_min_value=0,
@@ -52,37 +60,42 @@ NUMBERS: tuple[CradlewiseNumberDescription, ...] = (
     ),
     CradlewiseNumberDescription(
         key="bounce_amplitude",
-        name="Bounce Amplitude",
+        translation_key="bounce_amplitude",
         path=("device_state", "bounce_amplitude"),
         command="bounce_amplitude",
         native_min_value=0,
         native_max_value=100,
         native_step=1,
+        native_unit_of_measurement=PERCENTAGE,
         mode=NumberMode.SLIDER,
+        limit_path=("device_state", "max_bounce_limit"),
     ),
     CradlewiseNumberDescription(
         key="bounce_duration",
-        name="Bounce Duration",
+        translation_key="bounce_duration",
         path=("device_state", "bounce_duration"),
         command="bounce_duration",
-        native_min_value=0,
-        native_max_value=1440,
+        native_min_value=1,
+        native_max_value=60,
         native_step=1,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
         mode=NumberMode.SLIDER,
+        limit_path=("device_state", "bounce_duration_limit"),
     ),
-    CradlewiseNumberDescription(
+    _config_number(
         key="always_on_bounce_intensity",
-        name="Always On Bounce Intensity",
+        translation_key="always_on_bounce_intensity",
         path=("device_state", "bounce_always_on_intensity"),
         command="always_on_bounce_intensity",
         native_min_value=0,
         native_max_value=100,
         native_step=1,
+        native_unit_of_measurement=PERCENTAGE,
         mode=NumberMode.SLIDER,
     ),
-    CradlewiseNumberDescription(
+    _config_number(
         key="bounce_setting",
-        name="Bounce Setting",
+        translation_key="bounce_setting",
         path=("device_state", "bounce_setting"),
         command="bounce_setting",
         native_min_value=0,
@@ -91,28 +104,20 @@ NUMBERS: tuple[CradlewiseNumberDescription, ...] = (
         mode=NumberMode.SLIDER,
     ),
     CradlewiseNumberDescription(
-        key="responsivity_setting",
-        name="Responsivity Setting",
-        path=("device_state", "responsivity_setting"),
-        command="responsivity_setting",
-        native_min_value=0,
-        native_max_value=10,
-        native_step=1,
-        mode=NumberMode.SLIDER,
-    ),
-    CradlewiseNumberDescription(
         key="music_volume",
-        name="Music Volume",
+        translation_key="music_volume",
         path=("device_state", "music_volume"),
         command="music_volume",
         native_min_value=0,
         native_max_value=100,
         native_step=1,
+        native_unit_of_measurement=PERCENTAGE,
         mode=NumberMode.SLIDER,
+        limit_path=("device_state", "max_volume_limit"),
     ),
-    CradlewiseNumberDescription(
+    _config_number(
         key="keep_music_on_during_sleep_level",
-        name="Keep Music On During Sleep Level",
+        translation_key="keep_music_on_during_sleep_level",
         path=("device_state", "keep_music_on_during_sleep_level"),
         command="keep_music_on_during_sleep_level",
         native_min_value=0,
@@ -120,94 +125,47 @@ NUMBERS: tuple[CradlewiseNumberDescription, ...] = (
         native_step=1,
         mode=NumberMode.SLIDER,
     ),
-    CradlewiseNumberDescription(
+    _config_number(
         key="keep_bounce_on_during_sleep_level",
-        name="Keep Bounce On During Sleep Level",
+        translation_key="keep_bounce_on_during_sleep_level",
         path=("device_state", "keep_bounce_on_during_sleep_level"),
         command="keep_bounce_on_during_sleep_level",
         native_min_value=0,
-        native_max_value=5,
+        native_max_value=1,
         native_step=1,
         mode=NumberMode.SLIDER,
     ),
-    CradlewiseNumberDescription(
-        key="music_duration",
-        name="Music Duration",
-        path=("device_state", "music_duration"),
-        command="music_duration",
-        native_min_value=0,
-        native_max_value=1440,
-        native_step=1,
-        mode=NumberMode.SLIDER,
-    ),
-    CradlewiseNumberDescription(
+    _config_number(
         key="auto_mode_lock_duration",
-        name="Auto Mode Lock Duration",
+        translation_key="auto_mode_lock_duration",
         path=("device_state", "auto_mode_lock_duration"),
         command="auto_mode_lock_duration",
-        native_min_value=0,
-        native_max_value=1440,
+        native_min_value=1,
+        native_max_value=60,
         native_step=1,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
         mode=NumberMode.SLIDER,
     ),
-    CradlewiseNumberDescription(
+    _config_number(
         key="max_bounce_limit",
-        name="Max Bounce Limit",
+        translation_key="max_bounce_limit",
         path=("device_state", "max_bounce_limit"),
         command="max_bounce_limit",
         native_min_value=0,
         native_max_value=100,
         native_step=1,
+        native_unit_of_measurement=PERCENTAGE,
         mode=NumberMode.SLIDER,
     ),
-    CradlewiseNumberDescription(
+    _config_number(
         key="max_volume_limit",
-        name="Max Volume Limit",
+        translation_key="max_volume_limit",
         path=("device_state", "max_volume_limit"),
         command="max_volume_limit",
         native_min_value=0,
         native_max_value=100,
         native_step=1,
-        mode=NumberMode.SLIDER,
-    ),
-    CradlewiseNumberDescription(
-        key="start_recipe_music_level",
-        name="Start Recipe Music Level",
-        path=("device_state", "start_recipe_music_level"),
-        command="start_recipe_music_level",
-        native_min_value=0,
-        native_max_value=5,
-        native_step=1,
-        mode=NumberMode.SLIDER,
-    ),
-    CradlewiseNumberDescription(
-        key="start_recipe_bounce_level",
-        name="Start Recipe Bounce Level",
-        path=("device_state", "start_recipe_bounce_level"),
-        command="start_recipe_bounce_level",
-        native_min_value=0,
-        native_max_value=5,
-        native_step=1,
-        mode=NumberMode.SLIDER,
-    ),
-    CradlewiseNumberDescription(
-        key="start_recipe_lock_duration",
-        name="Start Recipe Lock Duration",
-        path=("device_state", "start_recipe_lock_duration"),
-        command="start_recipe_lock_duration",
-        native_min_value=0,
-        native_max_value=1440,
-        native_step=1,
-        mode=NumberMode.SLIDER,
-    ),
-    CradlewiseNumberDescription(
-        key="light_indicator_brightness",
-        name="Indicator Brightness",
-        path=("device_state", "light_intensity"),
-        command="light_indicator_brightness",
-        native_min_value=0,
-        native_max_value=100,
-        native_step=1,
+        native_unit_of_measurement=PERCENTAGE,
         mode=NumberMode.SLIDER,
     ),
 )
@@ -215,51 +173,76 @@ NUMBERS: tuple[CradlewiseNumberDescription, ...] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CradlewiseConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Cradlewise writable numbers."""
-    coordinator = hass.data[DOMAIN][entry.entry_id].get("coordinator")
+    coordinator = entry.runtime_data.coordinator
     if coordinator is None:
         return
-
     async_add_entities(
         CradlewiseBridgeNumber(entry, coordinator, description)
         for description in NUMBERS
     )
 
 
-class CradlewiseBridgeNumber(CoordinatorEntity, NumberEntity):
+class CradlewiseBridgeNumber(CradlewiseCoordinatorEntity, NumberEntity):
     """Number entity backed by the bridge command API."""
 
-    _attr_has_entity_name = True
+    entity_description: CradlewiseNumberDescription
 
     def __init__(
         self,
-        entry: ConfigEntry,
-        coordinator,
+        entry: CradlewiseConfigEntry,
+        coordinator: CradlewiseStatusCoordinator,
         description: CradlewiseNumberDescription,
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(entry, coordinator, description.key)
         self.entity_description = description
-        self._cradle_id = entry.data[CONF_CRADLE_ID]
-        self._attr_name = description.name
-        self._attr_unique_id = f"{self._cradle_id}_{description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._cradle_id)},
-            manufacturer="Cradlewise",
-            name=entry.data.get(CONF_NAME, "Cradlewise Local"),
+
+    @property
+    def available(self) -> bool:
+        """Require current state and an active MQTT publisher for controls."""
+        return (
+            super().available
+            and self._fresh(DEVICE_STATE_FRESHNESS)
+            and strict_bool(path_value(self.coordinator.data, ("mqtt", "connected")))
+            is True
+            and (
+                self.entity_description.limit_path is None
+                or self._dynamic_limit() is not None
+            )
+            and self.native_value is not None
+        )
+
+    def _dynamic_limit(self) -> float | None:
+        """Return the device-advertised maximum for a limited control."""
+        if self.entity_description.limit_path is None:
+            return None
+        return bounded_number(
+            path_value(self.coordinator.data, self.entity_description.limit_path),
+            minimum=self.native_min_value,
+            maximum=self.entity_description.native_max_value,
         )
 
     @property
-    def native_value(self) -> int | None:
+    def native_max_value(self) -> float:
+        """Use the current device limit when the control has one."""
+        dynamic_limit = self._dynamic_limit()
+        if dynamic_limit is not None:
+            return dynamic_limit
+        maximum = self.entity_description.native_max_value
+        assert maximum is not None
+        return maximum
+
+    @property
+    def native_value(self) -> float | None:
         value = path_value(self.coordinator.data, self.entity_description.path)
-        if value is None:
-            return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
+        return bounded_number(
+            value,
+            minimum=self.entity_description.native_min_value,
+            maximum=self.native_max_value,
+        )
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the numeric value."""

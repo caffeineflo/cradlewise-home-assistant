@@ -1,0 +1,252 @@
+"""Entity registry policy used by setup tests and the versioned migration."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class EntityPolicy:
+    """Keys that need a one-time registry policy change."""
+
+    disabled: frozenset[str] = frozenset()
+    removed: frozenset[str] = frozenset()
+
+
+ENTITY_POLICIES: dict[str, EntityPolicy] = {
+    "binary_sensor": EntityPolicy(
+        disabled=frozenset(
+            {
+                "mqtt_connected",
+                "audio_track",
+                "baby_presence_being_determined",
+                "sleep_state_being_determined",
+                "bounce_quiescent",
+                "lullabies_timer_on",
+                "inside_sleep_schedule",
+                "inside_soothing_window",
+                "breath_trigger",
+                "is_calibration_done",
+                "control_breath_enabled",
+                "start_recipe_on",
+                "upload_3d_data_enabled",
+                "upload_rgb_data_enabled",
+            }
+        ),
+        removed=frozenset(
+            {
+                "baby_present_previous",
+                "has_baby_ever_been_placed",
+                "bouncing",
+                "bounce_disabled",
+                "bounce_super_gentle",
+                "bounce_always_on",
+                "bounce_tap_detection_enabled",
+                "bounce_push_gesture_enabled",
+                "music_playing",
+                "sound_spotify_service_enabled",
+                "lullabies_enabled",
+                "keep_bounce_on_during_sleep",
+                "keep_music_on_during_sleep",
+                "auto_mode_lock_on",
+                "update_available",
+                "update_first",
+                "app_flip_video",
+                "max_sound_preview",
+                "control_adaptive_soothing_enabled",
+                "start_recipe_enabled",
+                "keep_bounce_on_during_sleep_is_on",
+                "keep_music_on_during_sleep_is_on",
+                "enable_acc_movement_detection",
+                "enable_coeff_sensor_update",
+                "significant_change_in_weight_enabled",
+                "weight_detection_enabled",
+                "restart_ggc_requested",
+                "charging",
+                "power_supply_removed",
+            }
+        ),
+    ),
+    "sensor": EntityPolicy(
+        disabled=frozenset(
+            {
+                "webrtc_connection_state",
+                "ice_connection_state",
+                "wifi_strength",
+                "wifi_ssid",
+                "device_state_source",
+                "device_state_updated_at",
+                "sleep_phase_raw",
+                "sleep_state_raw",
+                "sleep_state_internal",
+                "sleep_phase_event_start_time",
+                "sleep_phase_duration_start_time",
+                "sleep_phase_present_toggle_time",
+                "cradle_mode",
+                "bounce_duration_limit",
+                "bounce_tilt_state",
+                "sound_ambience",
+                "sound_color",
+                "sound_heartbeat_volume",
+                "sound_breath_volume",
+                "lullabies_current_song_id",
+                "lullabies_desired_playlist_id",
+                "lullabies_desired_song_id",
+                "lullabies_elapsed_time",
+                "lullabies_loop",
+                "lullabies_timer_duration",
+                "operation_state",
+                "deploy_state",
+                "calibrate_cradle",
+                "calibration_type",
+                "calibration_stage",
+                "calibration_status",
+                "user_action_for_obstruction",
+                "wifi_score",
+                "rootfs_version",
+                "shadow_version",
+                "cradle_timezone",
+                "breath_state",
+                "breath_reason",
+                "auto_mode_lock_end_time",
+                "start_recipe_lock_end_time",
+            }
+        ),
+        removed=frozenset(
+            {
+                "video_frames",
+                "audio_frames",
+                "resolution",
+                "uptime",
+                "cradle_state",
+                "cradle_op_mode",
+                "local_ip",
+                "sleep_event",
+                "bounce_mode",
+                "bounce_setting",
+                "bounce_amplitude",
+                "bounce_level",
+                "bounce_always_on_intensity",
+                "bounce_duration",
+                "bounce_movement_energy_threshold",
+                "bounce_acc_frame_peaks_threshold",
+                "responsivity_setting",
+                "music_volume",
+                "music_level",
+                "music_mode",
+                "volume_profile",
+                "sound_ambience_raw",
+                "sound_color_raw",
+                "lullabies_action",
+                "lullabies_volume",
+                "music_duration",
+                "light_intensity",
+                "battery_life",
+                "device_uptime_service",
+                "device_uptime_total",
+                "reported_state",
+                "sequence_id",
+                "report_wrong_status",
+                "calibrate_cradle_raw",
+                "calibration_type_raw",
+                "calibration_history_complete",
+                "calibration_history_gain_setup",
+                "calibration_history_mic_setup",
+                "calibration_history_noise_profile_setup",
+                "calibration_history_tof_calibration",
+                "calibration_history_weight_calibration",
+                "cradle_mode_to_calibrate",
+                "wifi_score_snr",
+                "wifi_score_speed",
+                "wifi_score_loss",
+                "wifi_score_jitter",
+                "wifi_stats_strength",
+                "wifi_stats_rssi0",
+                "wifi_stats_rssi1",
+                "wifi_stats_noise",
+                "wifi_stats_bitrate",
+                "wifi_stats_ssid",
+                "wifi_stats_arp_success_count",
+                "wifi_stats_beacon_loss_count",
+                "software_version",
+                "baby_profile_last_updated_time",
+                "update_status",
+                "update_step",
+                "update_version",
+                "update_progress",
+                "update_type",
+                "update_error_reason",
+                "control_bna_alert_control",
+                "control_cry_sensitivity",
+                "control_css_responsiveness",
+                "control_video_service_bit_mask",
+                "breath_final_rate",
+                "keep_bounce_on_during_sleep_level",
+                "keep_music_on_during_sleep_level",
+                "auto_mode_lock_duration",
+                "start_recipe_lock_duration",
+                "start_recipe_bounce_level",
+                "start_recipe_music_level",
+                "max_bounce_limit",
+                "max_volume_limit",
+                "sleep_time",
+                "wake_up_time",
+            }
+        ),
+    ),
+    "number": EntityPolicy(
+        disabled=frozenset(
+            {
+                "always_on_bounce_intensity",
+                "bounce_setting",
+                "keep_music_on_during_sleep_level",
+                "keep_bounce_on_during_sleep_level",
+                "auto_mode_lock_duration",
+                "max_bounce_limit",
+                "max_volume_limit",
+            }
+        ),
+        removed=frozenset(
+            {
+                "light_indicator_brightness",
+                "music_duration",
+                "responsivity_setting",
+                "start_recipe_music_level",
+                "start_recipe_bounce_level",
+                "start_recipe_lock_duration",
+            }
+        ),
+    ),
+    "select": EntityPolicy(
+        disabled=frozenset(
+            {
+                "volume_profile",
+                "light_indicator_mode",
+                "cry_sensitivity",
+                "responsivity_setting",
+                "start_recipe_music_level",
+                "start_recipe_bounce_level",
+                "start_recipe_lock_duration",
+            }
+        )
+    ),
+    "switch": EntityPolicy(
+        disabled=frozenset(
+            {
+                "disable_bounce",
+                "super_gentle_bounce",
+                "always_on_bounce",
+                "tap_detection_enabled",
+                "push_gesture_enabled",
+                "keep_music_on_during_sleep",
+                "keep_bounce_on_during_sleep",
+                "auto_mode_lock_on",
+                "start_recipe_enabled",
+            }
+        )
+    ),
+    "update": EntityPolicy(disabled=frozenset({"firmware"})),
+}
+
+DEFAULT_ENABLED_ENTITY_COUNT = 29
+DISABLED_ENTITY_COUNT = 78

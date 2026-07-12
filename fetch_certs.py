@@ -18,10 +18,12 @@ import sys
 from pathlib import Path
 
 import boto3
+import requests
 
 from cradlewise_api import (
     API_ENDPOINT,
     REGION,
+    REQUEST_TIMEOUT_SECONDS,
     S3_BUCKET,
     authenticate,
     get_accounts,
@@ -29,8 +31,6 @@ from cradlewise_api import (
     get_credentials_interactive,
     sign_request,
 )
-
-import requests
 
 
 def main():
@@ -79,30 +79,39 @@ def main():
 
     # -- Step 5: Fetch device certificates --
     cert_url = f"{API_ENDPOINT}/cradles/pairedUsers/v3"
-    cert_body = json.dumps({
-        "email_id": email,
-        "baby_id": int(baby_id),
-        "fcm_token": "local_stream_client",
-        "device": {
-            "registration_date": datetime.datetime.now().strftime("%Y-%m-%d"),
-            "app_version": "2.55.5",
-            "country": "US",
-            "os": "android",
-            "device_name": "Samsung Galaxy S24 Ultra",
-            "os_version": "14",
-            "timezone": "America/New_York",
-            "type": "phone",
-            "resolution": "{1440,3120}",
-        },
-    })
+    cert_body = json.dumps(
+        {
+            "email_id": email,
+            "baby_id": int(baby_id),
+            "fcm_token": "local_stream_client",
+            "device": {
+                "registration_date": datetime.datetime.now().strftime("%Y-%m-%d"),
+                "app_version": "2.55.5",
+                "country": "US",
+                "os": "android",
+                "device_name": "Samsung Galaxy S24 Ultra",
+                "os_version": "14",
+                "timezone": "America/New_York",
+                "type": "phone",
+                "resolution": "{1440,3120}",
+            },
+        }
+    )
     signed_headers = sign_request(
-        "POST", cert_url, credentials,
+        "POST",
+        cert_url,
+        credentials,
         body=cert_body,
         headers={"Content-Type": "application/json"},
     )
     signed_headers["Content-Type"] = "application/json"
 
-    resp = requests.post(cert_url, headers=signed_headers, data=cert_body)
+    resp = requests.post(
+        cert_url,
+        headers=signed_headers,
+        data=cert_body,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
     if not resp.ok:
         print(f"Cert API failed: {resp.status_code} {resp.reason}")
         print(f"Response body: {resp.text[:1000]}")
@@ -191,12 +200,12 @@ def main():
         print(f"  Device ID (from response): {device_uuid}")
 
     print(f"\nDone! Certificates saved to {out_dir}/")
-    print(f"\nTo use with a local MQTT client:")
+    print("\nTo use with a local MQTT client:")
     print(f"  CA cert:     {out_dir}/ca.pem")
     print(f"  Client cert: {out_dir}/client_cert.pem")
     print(f"  Client key:  {out_dir}/client_key.pem")
     print(f"  Device ID:   {out_dir}/device_id")
-    print(f"  Broker:      ssl://<crib_ip>:8883")
+    print("  Broker:      ssl://<crib_ip>:8883")
     print(f"  Cradle ID:   {returned_cradle_id}")
 
 

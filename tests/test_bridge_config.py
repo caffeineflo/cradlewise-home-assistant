@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from cradlewise_local.__main__ import build_parser
 from cradlewise_local.config import BridgeConfig, BridgeConfigError
 
 
@@ -71,6 +72,73 @@ def test_bridge_config_accepts_media_stale_timeout(tmp_path):
     )
 
     assert config.media_stale_timeout == 120
+
+
+def test_bridge_config_accepts_initial_frame_timeout_and_status_token(tmp_path):
+    certs_dir = tmp_path / "certs"
+    write_cert_set(certs_dir)
+
+    config = BridgeConfig.from_values(
+        cradle_id="cradle",
+        certs_dir=certs_dir,
+        output_url="rtsp://127.0.0.1:8554/cradlewise",
+        initial_frame_timeout=20,
+        status_token="secret",
+    )
+
+    assert config.initial_frame_timeout == 20
+    assert config.status_token == "secret"
+
+
+def test_bridge_config_rejects_blank_status_token(tmp_path):
+    certs_dir = tmp_path / "certs"
+    write_cert_set(certs_dir)
+
+    with pytest.raises(BridgeConfigError, match="must not be blank"):
+        BridgeConfig.from_values(
+            cradle_id="cradle",
+            certs_dir=certs_dir,
+            output_url="rtsp://127.0.0.1:8554/cradlewise",
+            status_token=" ",
+        )
+
+
+def test_bridge_cli_rejects_invalid_integer_environment_value(monkeypatch):
+    monkeypatch.setenv("CRADLEWISE_MEDIA_STALE_TIMEOUT", "not-an-integer")
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(
+            [
+                "--cradle-id",
+                "cradle",
+                "--output-url",
+                "rtsp://127.0.0.1:8554/cradlewise",
+            ]
+        )
+
+    assert exc_info.value.code == 2
+
+
+def test_bridge_cli_reads_output_url_from_environment(monkeypatch):
+    monkeypatch.setenv(
+        "CRADLEWISE_OUTPUT_URL", "rtsp://publisher:secret@mediamtx:8554/cradlewise"
+    )
+    parser = build_parser()
+
+    args = parser.parse_args(["--cradle-id", "cradle"])
+
+    assert args.output_url == "rtsp://publisher:secret@mediamtx:8554/cradlewise"
+
+
+def test_bridge_cli_requires_output_url_without_environment(monkeypatch):
+    monkeypatch.delenv("CRADLEWISE_OUTPUT_URL", raising=False)
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["--cradle-id", "cradle"])
+
+    assert exc_info.value.code == 2
 
 
 def test_bridge_config_requires_cloud_credentials_together(tmp_path):

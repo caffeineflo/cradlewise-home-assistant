@@ -6,6 +6,7 @@ against the Cradlewise backend. Used by both fetch_certs.py and stream_local.py.
 """
 
 import json
+import logging
 import os
 from getpass import getpass
 
@@ -24,6 +25,13 @@ IDENTITY_POOL_ID = "us-east-1:53b70db5-7440-4ecf-8dac-d6202eb6c1d2"
 REGION = "us-east-1"
 API_ENDPOINT = "https://backend.cradlewise.com/prod-latest"
 S3_BUCKET = "cradlewise-device-certs"
+REQUEST_TIMEOUT_SECONDS = 10
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class CradlewiseAPIError(RuntimeError):
+    """Raised when every Cradlewise API fallback fails."""
 
 
 def get_credentials_interactive():
@@ -96,7 +104,7 @@ def get_accounts(email, credentials):
     """
     url = f"{API_ENDPOINT}/accounts?emailId={requests.utils.quote(email)}"
     headers = sign_request("GET", url, credentials)
-    resp = requests.get(url, headers=headers)
+    resp = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
     resp.raise_for_status()
     return resp.json().get("accounts", [])
 
@@ -109,37 +117,57 @@ def get_cradle_ip(cradle_id, credentials):
 
     Returns the IP string, or None if unavailable.
     """
-    # Try v2 first
+    v2_error = None
     v2_url = f"{API_ENDPOINT}/cradles/{cradle_id}/onlineStatus/v2"
     headers = sign_request("GET", v2_url, credentials)
     try:
-        resp = requests.get(v2_url, headers=headers, timeout=10)
+        resp = requests.get(
+            v2_url,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
         resp.raise_for_status()
         data = resp.json()
         state_message_str = data.get("state_message")
         if state_message_str:
             state_msg = json.loads(state_message_str)
-            ip = (
-                state_msg.get("info", {})
-                .get("connectivity", {})
-                .get("localIP")
-            )
+            ip = state_msg.get("info", {}).get("connectivity", {}).get("localIP")
             if ip:
                 return ip
-    except Exception:
-        pass
+    except (requests.RequestException, TypeError, ValueError) as exc:
+        v2_error = exc
+        _LOGGER.warning(
+            "Cradlewise online status v2 failed for cradle %s; trying v1: %s",
+            cradle_id,
+            exc,
+        )
 
-    # Fall back to v1
+    v1_error = None
     v1_url = f"{API_ENDPOINT}/cradles/{cradle_id}/onlineStatus"
     headers = sign_request("GET", v1_url, credentials)
     try:
-        resp = requests.get(v1_url, headers=headers, timeout=10)
+        resp = requests.get(
+            v1_url,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
         resp.raise_for_status()
         data = resp.json()
         ip = data.get("local_ip")
         if ip:
             return ip
-    except Exception:
-        pass
+    except (requests.RequestException, TypeError, ValueError) as exc:
+        v1_error = exc
+        _LOGGER.error(
+            "Cradlewise online status v1 failed for cradle %s: %s",
+            cradle_id,
+            exc,
+        )
+
+    if v2_error is not None and v1_error is not None:
+        raise CradlewiseAPIError(
+            f"Cradlewise online status failed for cradle {cradle_id}: "
+            f"v2={v2_error}; v1={v1_error}"
+        ) from v1_error
 
     return None

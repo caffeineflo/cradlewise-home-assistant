@@ -1,8 +1,13 @@
 # Cradlewise Local
 
-Cradlewise Local bridges a Cradlewise smart crib into Home Assistant with a local audio/video stream, optional cloud-backed state sensors, and selected crib controls.
+Cradlewise Local bridges a Cradlewise smart crib into Home Assistant with a
+local audio/video stream, local device state, and selected crib controls.
 
-The bridge connects to the crib over the LAN using the local Greengrass MQTT/WebRTC path, publishes an ordinary RTSP stream, and exposes a small HTTP status/command API. The Home Assistant custom integration creates a camera entity from that RTSP stream and maps bridge/device state into sensors, binary sensors, and controls.
+The bridge connects to the crib over the LAN using the local Greengrass
+MQTT/WebRTC path, publishes an ordinary RTSP stream, and exposes a small HTTP
+status/command API. The Home Assistant custom integration creates a camera
+entity from that RTSP stream and maps current bridge/device state into a
+deliberately limited default entity surface.
 
 ## Status
 
@@ -13,13 +18,14 @@ Working now:
 - Local H264 video copied to RTSP without re-encoding
 - Crib audio muxed into the same RTSP stream as AAC mono
 - Home Assistant camera entity
-- Bridge health, MQTT, WebRTC, and media counters
-- Optional cloud state polling for APK-backed baby, sleep, bounce, music,
-  light, firmware/update, calibration, WiFi, breath, lullaby, and crib setting
-  state
-- Home Assistant controls for normal soothing/settings actions such as
-  bounce/music mode, levels, timers, lock duration, volume limits, start recipe,
-  and adaptive/cry sensitivity settings
+- A 29-entity default Home Assistant surface, with 78 advanced configuration
+  and diagnostic entities available but disabled by default
+- Bridge health based on MQTT, WebRTC, recent video, and the RTSP sink
+- APK-backed baby, sleep, bounce, music, light, firmware, WiFi, breath,
+  lullaby, and crib setting state from the crib's local MQTT shadow
+- APK-backed Home Assistant controls for normal soothing/settings actions.
+  Discrete APK values use selects, and amplitude, duration, and volume controls
+  honor the device-advertised limits.
 
 Still planned:
 
@@ -38,7 +44,9 @@ Cradlewise crib
   -> Home Assistant camera
 ```
 
-Cloud polling is optional. If you set `CRADLEWISE_EMAIL` and `CRADLEWISE_PASSWORD`, the bridge also polls Cradlewise's REST API for richer device state and exposes it through `/state`. Without those credentials, local audio/video and bridge health still work.
+The bridge gets normal device state directly from the crib's local MQTT
+shadow. Optional `CRADLEWISE_EMAIL` and `CRADLEWISE_PASSWORD` credentials can
+provide a cloud fallback, but they are not required for normal operation.
 
 ## Home Assistant Installation
 
@@ -53,19 +61,30 @@ Until this has a tagged HACS release, install it as a custom repository:
 The integration asks for:
 
 - Cradle ID
-- RTSP stream URL, for example `rtsp://192.0.2.20:8560/cradlewise`
+- Authenticated RTSP stream URL, for example
+  `rtsp://cradlewise-reader:<password>@192.0.2.20:8560/cradlewise`
 - Optional bridge status URL, for example `http://192.0.2.20:8088/state`
 - Optional snapshot URL if you expose snapshots separately
+- Bridge bearer token matching `CRADLEWISE_STATUS_TOKEN`
+
+With the bridge status URL configured, the default entity set contains the
+camera and the high-value baby, sleep, safety, soothing, and environment state
+and controls. Configuration and diagnostic entities are present in the entity
+registry but disabled by default. An upgrade from config entry version 1
+removes obsolete duplicate/cross-domain registry entries and preserves the
+unique IDs of retained entities.
 
 ## Optional Wake Event Recording
 
-The repository includes an optional Home Assistant helper that records wake
-events with two minutes of pre-roll and two minutes of post-roll. It uses the
-Cradlewise RTSP stream plus the integration's baby/sleep entities, and stores
-clips under Home Assistant's `/media` directory.
+The repository includes an optional native Home Assistant automation that
+records wake events with two minutes of lookback and two minutes after each
+trigger. It uses `camera.record`, stores clips under Home Assistant's
+authenticated `/media` directory, and deletes clips older than 14 days with a
+short daily maintenance command. It does not run a separate ffmpeg recorder or
+maintain a duplicate rolling buffer.
 
-See [Wake Event Recording](docs/process/wake-event-recording.md) for the helper
-script and YAML snippets.
+See [Wake Event Recording](docs/process/wake-event-recording.md) for the
+automation and required camera preload setting.
 
 ## Bridge Deployment
 
@@ -90,7 +109,9 @@ certs/<cradle_id>/
   device_id
 ```
 
-Copy `.env.example` to `.env` and fill in your cradle ID, crib IP, and optional cloud credentials:
+Copy `.env.example` to `.env`. Fill in the cradle ID, crib IP, host bind
+address, bridge token, and separate RTSP publisher and reader credentials.
+Cloud credentials are optional:
 
 ```bash
 cp .env.example .env
@@ -104,9 +125,24 @@ docker compose --env-file .env -f examples/docker-compose.yaml up -d --build
 
 The example exposes:
 
-- RTSP: `rtsp://<host>:8560/cradlewise`
-- Bridge state: `http://<host>:8088/state`
+- RTSP: `rtsp://<reader>:<password>@<host>:8560/cradlewise`
+- Authenticated bridge state: `http://<host>:8088/state`
 - Bridge health: `http://<host>:8088/health`
+
+`/health` is intentionally unauthenticated for container health checks. With
+`CRADLEWISE_STATUS_TOKEN` configured, the state, snapshot, and command
+endpoints require that bearer token; commands are disabled when no token is
+configured. MediaMTX allows only the publisher credential to publish and only
+the reader credential to consume the `cradlewise` path. The example containers
+run without added Linux capabilities, with `no-new-privileges`, read-only root
+filesystems, bounded resources, and rotated container logs. MediaMTX is pinned
+by both version and digest.
+
+The bridge returns HTTP 503 from `/health` when MQTT, WebRTC/video freshness,
+or the active RTSP sink is unhealthy. It also rejects stale snapshots and marks
+stale local/cloud state unavailable. A successful command response means the
+APK-shaped desired-shadow update was queued for MQTT publication; the next
+reported shadow update is the confirmation of the resulting device state.
 
 ## Published Bridge Image
 
@@ -160,5 +196,9 @@ These notes are kept because they explain the compatibility decisions in the bri
 ## Safety Notes
 
 Don't commit `certs/`, `.env`, APKs, or decompiled app output. The repository ignore rules already exclude those paths.
+
+The example uses bearer authentication over HTTP and RTSP credentials over the
+LAN; it does not terminate TLS. Bind it to the intended host address and keep
+the ports on a trusted network or behind an authenticated TLS proxy.
 
 The Cradlewise API constants in `cradlewise_api.py` are derived from the Android app configuration. They may change when Cradlewise ships app/backend updates.

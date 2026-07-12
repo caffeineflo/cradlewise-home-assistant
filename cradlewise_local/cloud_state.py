@@ -45,14 +45,22 @@ class CradlewiseCloudStateClient:
         if self._credentials is None:
             self.authenticate()
 
-        assert self._credentials is not None
-        headers = sign_request("GET", url, self._credentials)
+        credentials = self._credentials
+        if credentials is None:
+            raise CloudStateError(
+                "Cradlewise cloud authentication returned no credentials"
+            )
+        headers = sign_request("GET", url, credentials)
         response = requests.get(url, headers=headers, timeout=self.timeout_seconds)
 
         if response.status_code in {401, 403}:
             self.authenticate()
-            assert self._credentials is not None
-            headers = sign_request("GET", url, self._credentials)
+            credentials = self._credentials
+            if credentials is None:
+                raise CloudStateError(
+                    "Cradlewise cloud reauthentication returned no credentials"
+                )
+            headers = sign_request("GET", url, credentials)
             response = requests.get(url, headers=headers, timeout=self.timeout_seconds)
 
         try:
@@ -76,8 +84,8 @@ async def poll_cloud_state(
     if not config.cloud_state_enabled:
         return
 
-    assert config.cloud_email is not None
-    assert config.cloud_password is not None
+    if config.cloud_email is None or config.cloud_password is None:
+        raise CloudStateError("Cloud state polling requires email and password")
     client = CradlewiseCloudStateClient(
         email=config.cloud_email,
         password=config.cloud_password,
@@ -96,6 +104,7 @@ async def poll_cloud_state(
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            status_store.mark_device_state_error("cloud", str(exc))
             log.warning("Cloud state poll failed: %s", exc)
 
         await asyncio.sleep(config.cloud_state_poll_interval)

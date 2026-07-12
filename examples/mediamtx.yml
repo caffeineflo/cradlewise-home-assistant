@@ -1,0 +1,25 @@
+authMethod: internal
+
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+moq: false
+
+authInternalUsers:
+  - user: cradlewise-publisher
+    pass: replace-with-publisher-password
+    ips: []
+    permissions:
+      - action: publish
+        path: cradlewise
+
+  - user: cradlewise-reader
+    pass: replace-with-reader-password
+    ips: []
+    permissions:
+      - action: read
+        path: cradlewise
+
+paths:
+  cradlewise:

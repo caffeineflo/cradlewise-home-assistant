@@ -5,7 +5,7 @@ description = "Local Cradlewise bridge and Home Assistant integration helpers"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "aiortc>=1.14.0",
+  "aiortc==1.14.0",
   "boto3",
   "cryptography",
   "numpy",
@@ -17,6 +17,14 @@ dependencies = [
 [project.optional-dependencies]
 test = [
   "pytest>=8.0.0",
+  "pytest-asyncio==1.4.0",
+  "ruff==0.15.21",
+  "yamllint==1.38.0",
+]
+ha-test = [
+  "PyTurboJPEG==1.8.3; python_full_version >= '3.14.2'",
+  "ha-ffmpeg==3.2.2; python_full_version >= '3.14.2'",
+  "pytest-homeassistant-custom-component==0.13.346; python_full_version >= '3.14.2'",
 ]
 
 [project.scripts]
@@ -40,3 +48,10 @@ packages = ["cradlewise_local"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

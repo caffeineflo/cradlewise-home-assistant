@@ -16,42 +16,148 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run tests
+        run: uv run --frozen --python "${{ matrix.python-version }}" --extra test python -m pytest
+
+      - name: Compile Python files
+        run: >-
+          uv run --frozen --python "${{ matrix.python-version }}" python -m compileall
+          cradlewise_local custom_components tests stream_local.py cradlewise_api.py
+
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
 
-      - name: Run tests
-        run: uv run --extra test python -m pytest
+      - name: Check Python lint
+        run: uv run --frozen --python 3.12 --extra test ruff check .
 
-      - name: Compile Python files
-        run: uv run python -m compileall cradlewise_local custom_components tests stream_local.py cradlewise_api.py
+      - name: Check Python formatting
+        run: uv run --frozen --python 3.12 --extra test ruff format --check .
 
-  bridge-image:
+      - name: Check YAML
+        run: >-
+          uv run --frozen --python 3.12 --extra test yamllint
+          -d '{extends: default, rules: {document-start: disable, line-length: disable,
+          truthy: disable}}' .github examples
+
+  home-assistant-test:
     runs-on: ubuntu-latest
-    needs: test
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.14"
+
+      - name: Run Home Assistant integration tests
+        run: >-
+          uv run --frozen --python 3.14 --extra test --extra ha-test
+          python -m pytest tests/test_ha_integration.py
+
+  home-assistant-validation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - name: Run hassfest
+        uses: home-assistant/actions/hassfest@f4ca6f671bd429efb108c0f2fa0ae8af0215986c  # master
+
+      - name: Run HACS validation
+        uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa  # main
+        with:
+          category: integration
+          comment: false
+
+  bridge-image-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    needs:
+      - test
+      - lint
+      - home-assistant-test
+      - home-assistant-validation
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4
+
+      - name: Build bridge image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  bridge-image-publish:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs:
+      - test
+      - lint
+      - home-assistant-test
+      - home-assistant-validation
     permissions:
       contents: read
       packages: write
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v4
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0  # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -59,7 +165,7 @@ jobs:
 
       - name: Build image metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6
         with:
           images: ${{ env.BRIDGE_IMAGE }}
           tags: |
@@ -71,11 +177,11 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and publish bridge image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7
         with:
           context: .
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
