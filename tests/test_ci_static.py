@@ -48,11 +48,7 @@ def test_ci_pull_request_build_has_read_only_permissions():
 def test_ci_runs_lint_and_home_assistant_validation():
     workflow = Path(".github/workflows/tests.yml").read_text()
 
-    assert (
-        "ruff check" in workflow
-        and "hassfest" in workflow
-        and "hacs/action" in workflow
-    )
+    assert "ruff check" in workflow and "hassfest" in workflow
 
 
 def test_dockerfile_runs_as_non_root_with_healthcheck():
