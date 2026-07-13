@@ -3,6 +3,7 @@ from pathlib import Path
 EXAMPLE_DIR = Path("examples/home-assistant/wake-recorder")
 AUTOMATIONS_PATH = EXAMPLE_DIR / "automations.yaml"
 SHELL_COMMANDS_PATH = EXAMPLE_DIR / "shell_commands.yaml"
+CARD_PATH = EXAMPLE_DIR / "cradlewise-wake-card.js"
 DOCS_PATH = Path("docs/process/wake-event-recording.md")
 
 
@@ -130,7 +131,27 @@ def test_documentation_preserves_six_state_anchors():
     assert all(entity_id in documentation for entity_id in state_anchors)
 
 
-def test_documentation_does_not_publish_a_public_gallery():
+def test_documentation_does_not_restore_the_public_gallery():
     documentation = DOCS_PATH.read_text()
 
-    assert "/local/cradlewise-wake" not in documentation
+    assert "/local/cradlewise-wake/index.html" not in documentation
+
+
+def test_wake_card_browses_authenticated_media_source():
+    card = CARD_PATH.read_text()
+
+    assert 'type: "media_source/browse_media"' in card
+
+
+def test_wake_card_resolves_signed_playback_urls():
+    card = CARD_PATH.read_text()
+
+    assert 'type: "media_source/resolve_media"' in card
+
+
+def test_documentation_points_card_at_private_media_directory():
+    documentation = DOCS_PATH.read_text()
+
+    assert (
+        "media-source://media_source/local/cradlewise-wake/events" in documentation
+    )

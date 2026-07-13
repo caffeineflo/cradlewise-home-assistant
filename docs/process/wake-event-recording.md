@@ -52,6 +52,36 @@ Recordings appear under Local Media in Home Assistant and on disk at:
 Do not copy these clips to `/config/www` or serve them through `/local`.
 Home Assistant does not protect `/local` files with authentication.
 
+## Dashboard Card
+
+The optional wake-clips card lists recordings through Home Assistant's
+authenticated media-source API. Its JavaScript is a static dashboard resource,
+but the MP4 files remain under `/media` and each playback URL is signed by Home
+Assistant for the logged-in session.
+
+1. Copy the card module into Home Assistant:
+
+   ```bash
+   cp examples/home-assistant/wake-recorder/cradlewise-wake-card.js \
+     /config/www/cradlewise-wake-card.js
+   ```
+
+2. Add `/local/cradlewise-wake-card.js?v=1` as a JavaScript module under
+   **Settings > Dashboards > Resources**.
+3. Add this card to the dashboard:
+
+   ```yaml
+   type: custom:cradlewise-wake-clips-card
+   title: Wake Clips
+   media_content_id: media-source://media_source/local/cradlewise-wake/events
+   limit: 8
+   refresh_seconds: 300
+   ```
+
+The card refreshes every five minutes and shows the eight newest clips first.
+Changing the card JavaScript later requires incrementing the `?v=1` resource
+version so browsers do not keep an old cached copy.
+
 ## Trigger Behavior
 
 The example starts a recording only when the baby is present and one of these
