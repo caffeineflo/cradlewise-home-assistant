@@ -152,6 +152,4 @@ def test_wake_card_resolves_signed_playback_urls():
 def test_documentation_points_card_at_private_media_directory():
     documentation = DOCS_PATH.read_text()
 
-    assert (
-        "media-source://media_source/local/cradlewise-wake/events" in documentation
-    )
+    assert "media-source://media_source/local/cradlewise-wake/events" in documentation
