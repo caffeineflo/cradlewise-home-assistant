@@ -1205,6 +1205,7 @@ class BridgeStatusStore:
     crib_ip: str
     cloud_state_stale_after: int = 90
     local_state_stale_after: int = 300
+    analytics_stale_after: int = 2700
     started_at: float = field(default_factory=_now)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _mqtt_connected: bool = False
@@ -1234,6 +1235,9 @@ class BridgeStatusStore:
     _device_states: dict[str, dict[str, Any]] = field(default_factory=dict)
     _device_state_updated_at: dict[str, float] = field(default_factory=dict)
     _device_state_errors: dict[str, str | None] = field(default_factory=dict)
+    _sleep_analytics: dict[str, Any] | None = None
+    _sleep_analytics_updated_at: float | None = None
+    _sleep_analytics_error: str | None = None
     _beacon: dict[str, Any] | None = None
 
     def set_mqtt_connected(self, connected: bool) -> None:
@@ -1343,6 +1347,18 @@ class BridgeStatusStore:
         with self._lock:
             self._device_state_errors[source] = error
 
+    def update_sleep_analytics(self, payload: dict[str, Any]) -> None:
+        """Replace the normalized official Data API analytics snapshot."""
+        with self._lock:
+            self._sleep_analytics = copy.deepcopy(payload)
+            self._sleep_analytics_updated_at = _now()
+            self._sleep_analytics_error = None
+
+    def mark_sleep_analytics_error(self, error: str) -> None:
+        """Record an official Data API error without discarding prior values."""
+        with self._lock:
+            self._sleep_analytics_error = error
+
     def _source_stale_locked(self, source: str, now: float) -> bool:
         updated_at = self._device_state_updated_at.get(source)
         if updated_at is None:
@@ -1408,6 +1424,7 @@ class BridgeStatusStore:
             now = _now()
             cradle_state = copy.deepcopy(self._cradle_state)
             beacon = copy.deepcopy(self._beacon)
+            analytics = copy.deepcopy(self._sleep_analytics) or {}
             device_state, device_source, device_updated_at, source_meta = (
                 self._merged_device_state_locked(now)
             )
@@ -1444,6 +1461,15 @@ class BridgeStatusStore:
             device_snapshot = _device_state_snapshot(device_state)
             device_available = bool(device_state) and any(
                 not metadata["stale"] for metadata in source_meta.values()
+            )
+            analytics_age = (
+                max(0.0, now - self._sleep_analytics_updated_at)
+                if self._sleep_analytics_updated_at is not None
+                else None
+            )
+            analytics_available = bool(self._sleep_analytics) and (
+                analytics_age is not None
+                and analytics_age <= self.analytics_stale_after
             )
 
             return {
@@ -1519,6 +1545,14 @@ class BridgeStatusStore:
                     "available": device_available,
                     "stale": bool(device_state) and not device_available,
                     "sources": source_meta,
+                },
+                "analytics": {
+                    **analytics,
+                    "updated_at": self._sleep_analytics_updated_at,
+                    "age_seconds": analytics_age,
+                    "available": analytics_available,
+                    "stale": bool(self._sleep_analytics) and not analytics_available,
+                    "error": self._sleep_analytics_error,
                 },
             }
 

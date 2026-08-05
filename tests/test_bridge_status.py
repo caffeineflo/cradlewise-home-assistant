@@ -146,6 +146,43 @@ def test_status_store_reports_source_error_before_first_state():
     assert device_state["sources"]["cloud"]["error"] == "request timed out"
 
 
+def test_status_store_tracks_official_sleep_analytics(monkeypatch):
+    now = 1000.0
+    monkeypatch.setattr("cradlewise_local.status._now", lambda: now)
+    store = BridgeStatusStore(
+        cradle_id="cradle-1",
+        crib_ip="192.0.2.10",
+        analytics_stale_after=900,
+    )
+    store.update_sleep_analytics(
+        {
+            "date": "2026-03-10",
+            "timezone": "America/New_York",
+            "total_sleep_today": 120,
+        }
+    )
+
+    analytics = store.snapshot()["analytics"]
+
+    assert analytics["available"] is True
+    assert analytics["total_sleep_today"] == 120
+
+
+def test_status_store_marks_official_sleep_analytics_stale(monkeypatch):
+    now = 1000.0
+    monkeypatch.setattr("cradlewise_local.status._now", lambda: now)
+    store = BridgeStatusStore(
+        cradle_id="cradle-1",
+        crib_ip="192.0.2.10",
+        analytics_stale_after=1,
+    )
+    store.update_sleep_analytics({"total_sleep_today": 120})
+
+    now = 1002.0
+
+    assert store.snapshot()["analytics"]["available"] is False
+
+
 def test_status_http_server_serves_cached_snapshot_jpeg():
     store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
     server = BridgeStatusHttpServer(store, "127.0.0.1", _free_port())

@@ -136,14 +136,25 @@ def test_manifest_is_local_polling_config_flow_integration():
         == "https://github.com/caffeineflo/cradlewise-local/issues"
     )
     assert manifest["version"] == "0.1.0"
+    assert manifest["name"] == "Cradlewise"
+
+
+def test_package_and_integration_versions_match():
+    manifest = json.loads((INTEGRATION_PATH / "manifest.json").read_text())
+    project = Path("pyproject.toml").read_text()
+    version_line = next(
+        line for line in project.splitlines() if line.startswith("version = ")
+    )
+
+    assert version_line == f'version = "{manifest["version"]}"'
 
 
 def test_hacs_metadata_and_brand_asset_exist():
     hacs = json.loads(Path("hacs.json").read_text())
 
-    assert hacs["name"] == "Cradlewise Local"
+    assert hacs["name"] == "Cradlewise"
     assert hacs["homeassistant"] >= "2026.5.0"
-    assert Path("brands/cradlewise_local/icon.png").exists()
+    assert (INTEGRATION_PATH / "brand/icon.png").exists()
 
 
 def test_public_repo_scaffolding_exists():
@@ -151,6 +162,10 @@ def test_public_repo_scaffolding_exists():
     assert Path(".github/workflows/tests.yml").exists()
     assert Path(".env.example").exists()
     assert Path("examples/docker-compose.yaml").exists()
+    assert Path("LICENSE").exists()
+    assert Path("CHANGELOG.md").exists()
+    assert Path("CONTRIBUTING.md").exists()
+    assert Path("SECURITY.md").exists()
 
 
 def test_url_helpers_validate_hosts_schemes_and_ports():
@@ -204,14 +219,27 @@ def test_bearer_auth_is_limited_to_the_bridge_origin():
     )
 
 
-def test_entity_surface_is_exactly_29_enabled_and_78_disabled():
+def test_entity_surface_is_exactly_35_enabled_and_78_disabled():
     surface = _surface()
     enabled = sum(len(keys - disabled) for keys, disabled in surface.values())
     disabled = sum(len(disabled) for _, disabled in surface.values())
 
-    assert enabled == policy.DEFAULT_ENABLED_ENTITY_COUNT == 29
+    assert enabled == policy.DEFAULT_ENABLED_ENTITY_COUNT == 35
     assert disabled == policy.DISABLED_ENTITY_COUNT == 78
-    assert sum(len(keys) for keys, _ in surface.values()) == 107
+    assert sum(len(keys) for keys, _ in surface.values()) == 113
+
+
+def test_official_sleep_analytics_are_enabled_by_default():
+    sensor_keys, disabled = _surface()["sensor"]
+
+    assert {
+        "total_sleep_today",
+        "day_sleep_today",
+        "night_sleep_today",
+        "naps_today",
+        "longest_stretch_today",
+        "soothes_today",
+    } <= sensor_keys - disabled
 
 
 def test_entity_migration_policy_matches_platform_defaults_and_pruning():

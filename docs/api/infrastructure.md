@@ -66,7 +66,7 @@
 | Type | URL | Username | Password |
 |------|-----|----------|----------|
 | STUN | `stun:stun.l.google.com:19302` | -- | -- |
-| TURN | `turn:ec2-34-226-215-23.compute-1.amazonaws.com:3478` | `user` | `root` |
+| TURN | `turn:ec2-34-226-215-23.compute-1.amazonaws.com:3478` | App-embedded credential (redacted) | App-embedded credential (redacted) |
 
 ### Janus WebRTC Gateway (Remote Streaming)
 

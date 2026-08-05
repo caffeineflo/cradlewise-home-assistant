@@ -12,6 +12,7 @@ import time
 from .cloud_state import poll_cloud_state
 from .commands import BridgeCommandHandler
 from .config import BridgeConfig, BridgeConfigError, resolve_secret_value
+from .data_api import poll_data_api
 from .sinks import FfmpegRtspSink
 from .status import BridgeStatusHttpServer, BridgeStatusStore
 from .streamer import run_bridge
@@ -79,6 +80,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds between optional Cradlewise cloud state polls",
     )
     parser.add_argument(
+        "--data-api-token",
+        default=os.environ.get("CRADLEWISE_DATA_API_TOKEN"),
+        help="Token for optional official Data API sleep analytics",
+    )
+    parser.set_defaults(
+        data_api_token_file=os.environ.get("CRADLEWISE_DATA_API_TOKEN_FILE")
+    )
+    parser.add_argument(
+        "--data-api-poll-interval",
+        type=int,
+        default=_env_int_default("CRADLEWISE_DATA_API_POLL_INTERVAL", 900),
+        help="Seconds between optional official Data API sleep polls",
+    )
+    parser.add_argument(
         "--media-stale-timeout",
         type=int,
         default=_env_int_default("CRADLEWISE_MEDIA_STALE_TIMEOUT", 90),
@@ -112,6 +127,16 @@ def resolve_cloud_credentials(args: argparse.Namespace) -> None:
         file_path=args.cloud_password_file,
         direct_name="CRADLEWISE_PASSWORD",
         file_name="CRADLEWISE_PASSWORD_FILE",
+    )
+
+
+def resolve_data_api_token(args: argparse.Namespace) -> None:
+    """Resolve the direct or file-backed official Data API token."""
+    args.data_api_token = resolve_secret_value(
+        direct_value=args.data_api_token,
+        file_path=args.data_api_token_file,
+        direct_name="CRADLEWISE_DATA_API_TOKEN",
+        file_name="CRADLEWISE_DATA_API_TOKEN_FILE",
     )
 
 
@@ -177,6 +202,8 @@ async def async_main(args: argparse.Namespace) -> None:
         cloud_email=args.cloud_email,
         cloud_password=args.cloud_password,
         cloud_state_poll_interval=args.cloud_state_poll_interval,
+        data_api_token=args.data_api_token,
+        data_api_poll_interval=args.data_api_poll_interval,
         media_stale_timeout=args.media_stale_timeout,
         initial_frame_timeout=args.initial_frame_timeout,
         status_token=args.status_token,
@@ -192,6 +219,7 @@ async def async_main(args: argparse.Namespace) -> None:
         cradle_id=config.cradle_id,
         crib_ip=config.crib_ip or "discovery",
         cloud_state_stale_after=max(90, config.cloud_state_poll_interval * 3),
+        analytics_stale_after=max(1800, config.data_api_poll_interval * 3),
     )
     command_handler = BridgeCommandHandler(state_provider=store.snapshot)
     status_server = BridgeStatusHttpServer(
@@ -220,6 +248,8 @@ async def async_main(args: argparse.Namespace) -> None:
     )
     if config.cloud_state_enabled:
         tasks.append(asyncio.create_task(poll_cloud_state(config, store)))
+    if config.data_api_enabled:
+        tasks.append(asyncio.create_task(poll_data_api(config, store)))
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
         for task in done:
@@ -236,6 +266,7 @@ def main() -> None:
     args = parser.parse_args()
     try:
         resolve_cloud_credentials(args)
+        resolve_data_api_token(args)
     except BridgeConfigError as exc:
         parser.error(str(exc))
     logging.basicConfig(

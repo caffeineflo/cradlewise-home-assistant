@@ -56,6 +56,15 @@ ANCHOR_KEYS = {
     "sleep_state",
 }
 
+ANALYTICS_VALUES = {
+    "total_sleep_today": 120,
+    "day_sleep_today": 30,
+    "night_sleep_today": 90,
+    "naps_today": 2,
+    "longest_stretch_today": 90,
+    "soothes_today": 3,
+}
+
 
 def _bridge_payload(*, updated_at: float | None = None) -> dict[str, Any]:
     timestamp = time.time() if updated_at is None else updated_at
@@ -93,6 +102,11 @@ def _bridge_payload(*, updated_at: float | None = None) -> dict[str, Any]:
             "music_mood": "calm",
             "ambient_temperature": 22,
             "software_version": "0.2.72",
+        },
+        "analytics": {
+            "available": True,
+            "updated_at": timestamp,
+            **ANALYTICS_VALUES,
         },
     }
 
@@ -397,7 +411,21 @@ async def test_entity_registry_defaults_match_policy_counts(
         for registry_entry in entries
     )
 
-    assert (enabled, disabled, len(entries)) == (29, 78, 107)
+    assert (enabled, disabled, len(entries)) == (35, 78, 113)
+
+
+async def test_official_sleep_analytics_map_to_enabled_sensor_states(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+) -> None:
+    entry = await _setup_entry(hass, aioclient_mock)
+    states = {}
+    for registry_entry in _registry_entries(hass, entry):
+        key = registry_entry.unique_id.removeprefix(f"{CRADLE_ID}_")
+        if key in ANALYTICS_VALUES:
+            states[key] = _entity_state(hass, registry_entry.entity_id)
+
+    assert states == {key: str(value) for key, value in ANALYTICS_VALUES.items()}
 
 
 async def test_camera_and_anchor_unique_ids_are_stable(
@@ -413,6 +441,41 @@ async def test_camera_and_anchor_unique_ids_are_stable(
     }
 
     assert expected <= unique_ids
+
+
+async def test_two_cradles_keep_separate_config_entry_identity(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+) -> None:
+    first_entry = await _setup_entry(hass, aioclient_mock)
+    second_cradle_id = "00000000-0000-4000-8000-000000000002"
+    second_bridge_url = "http://second-bridge.test:8088"
+    second_payload = deepcopy(_bridge_payload())
+    second_payload["bridge"]["cradle_id"] = second_cradle_id
+    aioclient_mock.get(f"{second_bridge_url}/state", json=second_payload)
+    second_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Second Cradlewise",
+        unique_id=second_cradle_id,
+        data={
+            **_entry_data(bridge_url=second_bridge_url, name="Second Cradlewise"),
+            CONF_CRADLE_ID: second_cradle_id,
+        },
+        version=2,
+    )
+    second_entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(second_entry.entry_id)
+    await hass.async_block_till_done()
+
+    first_unique_ids = {
+        entry.unique_id for entry in _registry_entries(hass, first_entry)
+    }
+    second_unique_ids = {
+        entry.unique_id for entry in _registry_entries(hass, second_entry)
+    }
+    assert len(first_unique_ids) == len(second_unique_ids) == 113
+    assert first_unique_ids.isdisjoint(second_unique_ids)
 
 
 async def test_anchor_entities_become_unavailable_when_state_is_stale(

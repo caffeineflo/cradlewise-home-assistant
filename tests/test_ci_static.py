@@ -48,7 +48,11 @@ def test_ci_pull_request_build_has_read_only_permissions():
 def test_ci_runs_lint_and_home_assistant_validation():
     workflow = Path(".github/workflows/tests.yml").read_text()
 
-    assert "ruff check" in workflow and "hassfest" in workflow
+    assert (
+        "ruff check" in workflow
+        and "hassfest" in workflow
+        and "hacs/action" in workflow
+    )
 
 
 def test_dockerfile_runs_as_non_root_with_healthcheck():
@@ -63,4 +67,13 @@ def test_compose_pins_and_authenticates_media_server():
     assert (
         "bluenviron/mediamtx:1.19.2@sha256:" in compose
         and "AUTHINTERNALUSERS" in compose
+    )
+
+
+def test_compose_uses_versioned_published_bridge_image():
+    compose = Path("examples/docker-compose.yaml").read_text()
+
+    assert (
+        "ghcr.io/caffeineflo/cradlewise-local-bridge:" in compose
+        and "build:" not in compose
     )

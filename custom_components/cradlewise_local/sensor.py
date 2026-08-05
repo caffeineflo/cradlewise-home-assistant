@@ -79,6 +79,7 @@ class CradlewiseSensorDescription(SensorEntityDescription):
     path: tuple[str, ...]
     value_fn: Callable[[Any], Any] = _identity
     freshness_paths: tuple[tuple[str, ...], ...] = DEVICE_STATE_FRESHNESS
+    availability_path: tuple[str, ...] | None = None
 
 
 def _diagnostic(
@@ -97,6 +98,23 @@ def _diagnostic(
         freshness_paths=freshness_paths,
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
+        **kwargs,
+    )
+
+
+def _analytics(
+    *,
+    key: str,
+    value_fn: Callable[[Any], Any],
+    **kwargs: Any,
+) -> CradlewiseSensorDescription:
+    return CradlewiseSensorDescription(
+        key=key,
+        translation_key=key,
+        path=("analytics", key),
+        value_fn=value_fn,
+        freshness_paths=(),
+        availability_path=("analytics", "available"),
         **kwargs,
     )
 
@@ -153,6 +171,44 @@ SENSORS: tuple[CradlewiseSensorDescription, ...] = (
         translation_key="sleep_phase",
         path=("device_state", "sleep_phase"),
         value_fn=_nonempty_string,
+    ),
+    _analytics(
+        key="total_sleep_today",
+        value_fn=nonnegative_int,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    _analytics(
+        key="day_sleep_today",
+        value_fn=nonnegative_int,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    _analytics(
+        key="night_sleep_today",
+        value_fn=nonnegative_int,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    _analytics(
+        key="naps_today",
+        value_fn=nonnegative_int,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    _analytics(
+        key="longest_stretch_today",
+        value_fn=nonnegative_int,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    _analytics(
+        key="soothes_today",
+        value_fn=nonnegative_int,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     _diagnostic(
         key="sleep_phase_raw",
@@ -409,6 +465,14 @@ class CradlewiseStatusSensor(CradlewiseCoordinatorEntity, SensorEntity):
             and (
                 not self.entity_description.freshness_paths
                 or self._fresh(self.entity_description.freshness_paths)
+            )
+            and (
+                self.entity_description.availability_path is None
+                or path_value(
+                    self.coordinator.data,
+                    self.entity_description.availability_path,
+                )
+                is True
             )
             and self.native_value is not None
         )

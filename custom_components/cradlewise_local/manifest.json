@@ -1,6 +1,6 @@
 {
   "domain": "cradlewise_local",
-  "name": "Cradlewise Local",
+  "name": "Cradlewise",
   "codeowners": ["@caffeineflo"],
   "config_flow": true,
   "dependencies": ["ffmpeg", "stream"],

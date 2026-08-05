@@ -248,5 +248,5 @@ ENTITY_POLICIES: dict[str, EntityPolicy] = {
     "update": EntityPolicy(disabled=frozenset({"firmware"})),
 }
 
-DEFAULT_ENABLED_ENTITY_COUNT = 29
+DEFAULT_ENABLED_ENTITY_COUNT = 35
 DISABLED_ENTITY_COUNT = 78

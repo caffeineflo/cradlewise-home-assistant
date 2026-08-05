@@ -1,6 +1,6 @@
-# Cradlewise Local
+# Cradlewise
 
-Cradlewise Local bridges a Cradlewise smart crib into Home Assistant with a
+Cradlewise bridges a Cradlewise smart crib into Home Assistant with a
 local audio/video stream, local device state, and selected crib controls.
 
 The bridge connects to the crib over the LAN using the local Greengrass
@@ -11,14 +11,16 @@ deliberately limited default entity surface.
 
 ## Status
 
-This is early software. It works in a live Home Assistant setup, but it still needs more mileage before a public HACS release.
+This is pre-release software running in a live Home Assistant setup. The code is
+being prepared for a public custom HACS release before applying to the default
+HACS catalog.
 
 Working now:
 
 - Local H264 video copied to RTSP without re-encoding
 - Crib audio muxed into the same RTSP stream as AAC mono
 - Home Assistant camera entity
-- A 29-entity default Home Assistant surface, with 78 advanced configuration
+- A 35-entity default Home Assistant surface, with 78 advanced configuration
   and diagnostic entities available but disabled by default
 - Bridge health based on MQTT, WebRTC, recent video, and the RTSP sink
 - APK-backed baby, sleep, bounce, music, light, firmware, WiFi, breath,
@@ -26,11 +28,13 @@ Working now:
 - APK-backed Home Assistant controls for normal soothing/settings actions.
   Discrete APK values use selects, and amplitude, duration, and volume controls
   honor the device-advertised limits.
+- Optional official Data API analytics for total, day, and night sleep, nap
+  count, longest stretch, and soothe count.
 
 Still planned:
 
-- Sleep analytics entities
-- Packaged releases and HACS release workflow
+- A tagged `v0.1.0` GitHub release and public bridge image
+- Home Assistant Brands registration for default HACS catalog submission
 - More fixture coverage for alternate Cradlewise payload shapes
 
 ## Architecture
@@ -42,11 +46,23 @@ Cradlewise crib
   -> RTSP H264 passthrough + AAC audio
   -> MediaMTX or another RTSP server
   -> Home Assistant camera
+
+Official Cradlewise Data API (optional)
+  -> cradlewise-local bridge analytics client
+  -> bridge status API
+  -> Home Assistant sleep sensors
 ```
 
 The bridge gets normal device state directly from the crib's local MQTT
 shadow. Optional `CRADLEWISE_EMAIL` and `CRADLEWISE_PASSWORD` credentials can
 provide a cloud fallback, but they are not required for normal operation.
+
+The repository intentionally keeps two runtime layers separate without forcing
+a multi-repository release. `cradlewise_local/` owns crib protocols, streaming,
+cloud fallback, and official Data API normalization. The HACS-installed
+`custom_components/cradlewise_local/` package is a thin Home Assistant adapter
+that only talks to the bridge HTTP and RTSP endpoints. This boundary can become
+a standalone Python package later if other consumers need it.
 
 ## Home Assistant Installation
 
@@ -54,9 +70,9 @@ Until this has a tagged HACS release, install it as a custom repository:
 
 1. In HACS, add this repository as a custom repository.
 2. Choose category `Integration`.
-3. Install `Cradlewise Local`.
+3. Install `Cradlewise`.
 4. Restart Home Assistant.
-5. Add `Cradlewise Local` from Settings -> Devices & services.
+5. Add `Cradlewise` from Settings -> Devices & services.
 
 The integration asks for:
 
@@ -126,10 +142,18 @@ with its corresponding `_FILE` variable. File paths are resolved inside the
 bridge process, so container deployments must mount them read-only at the
 configured paths.
 
+Official sleep analytics are independent of the account-password cloud
+fallback. Nurture Plus users can request a read-only Data API token from
+Cradlewise and set `CRADLEWISE_DATA_API_TOKEN`, or mount it through
+`CRADLEWISE_DATA_API_TOKEN_FILE`. The bridge polls the two sleep endpoints every
+15 minutes by default, which stays well below the documented rate limit. The
+six analytics entities remain unavailable when no token is configured and do
+not affect local streaming, device state, or controls.
+
 Run the development/trusted-LAN example bridge stack:
 
 ```bash
-docker compose --env-file .env -f examples/docker-compose.yaml up -d --build
+docker compose --env-file .env -f examples/docker-compose.yaml up -d
 ```
 
 The example exposes:
@@ -180,6 +204,8 @@ ghcr.io/caffeineflo/cradlewise-local-bridge
 Published tags include `main`, `latest`, the short git SHA, and release tags
 such as `v0.1.0`. For a server deployment, prefer pulling a published tag and
 recreating the bridge container deliberately rather than auto-deploying from CI.
+The example Compose file uses `CRADLEWISE_BRIDGE_VERSION=0.1.0`; that tag and
+the GHCR package must be public as part of the first release.
 
 ## Local Development
 
@@ -202,6 +228,12 @@ uv run cradlewise-local \
   --cradle-id 00000000-0000-4000-8000-000000000000 \
   --ip 192.0.2.10 \
   --output-url rtsp://127.0.0.1:8560/cradlewise
+```
+
+Build a local development image when changing bridge code:
+
+```bash
+docker build -t cradlewise-local-bridge:dev .
 ```
 
 ## Research Notes
@@ -227,3 +259,6 @@ LAN; it does not terminate TLS. Bind it to the intended host address and keep
 the ports on a trusted network or behind an authenticated TLS proxy.
 
 The Cradlewise API constants in `cradlewise_api.py` are derived from the Android app configuration. They may change when Cradlewise ships app/backend updates.
+
+This project is not affiliated with or endorsed by Cradlewise. Cradlewise and
+related marks belong to their respective owners.

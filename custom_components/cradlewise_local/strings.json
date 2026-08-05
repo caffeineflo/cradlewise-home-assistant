@@ -1,5 +1,5 @@
 {
-  "title": "Cradlewise Local",
+  "title": "Cradlewise",
   "config": {
     "abort": {
       "already_configured": "This Cradlewise local bridge is already configured",
@@ -118,6 +118,12 @@
       "device_state_updated_at": {"name": "Device state updated at"},
       "sleep_state": {"name": "Sleep state"},
       "sleep_phase": {"name": "Sleep phase"},
+      "total_sleep_today": {"name": "Total sleep today"},
+      "day_sleep_today": {"name": "Day sleep today"},
+      "night_sleep_today": {"name": "Night sleep today"},
+      "naps_today": {"name": "Naps today"},
+      "longest_stretch_today": {"name": "Longest stretch today"},
+      "soothes_today": {"name": "Soothes today"},
       "sleep_phase_raw": {"name": "Sleep phase raw"},
       "sleep_state_raw": {"name": "Sleep state raw"},
       "sleep_state_internal": {"name": "Sleep state internal"},

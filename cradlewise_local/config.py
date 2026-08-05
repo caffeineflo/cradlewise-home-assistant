@@ -66,6 +66,8 @@ class BridgeConfig:
     cloud_email: str | None = None
     cloud_password: str | None = None
     cloud_state_poll_interval: int = 30
+    data_api_token: str | None = None
+    data_api_poll_interval: int = 900
     media_stale_timeout: int = 90
     initial_frame_timeout: int = 15
     status_token: str | None = None
@@ -87,6 +89,8 @@ class BridgeConfig:
         cloud_email: str | None = None,
         cloud_password: str | None = None,
         cloud_state_poll_interval: int = 30,
+        data_api_token: str | None = None,
+        data_api_poll_interval: int = 900,
         media_stale_timeout: int = 90,
         initial_frame_timeout: int = 15,
         status_token: str | None = None,
@@ -111,6 +115,10 @@ class BridgeConfig:
             cloud_email=cloud_email,
             cloud_password=cloud_password,
             cloud_state_poll_interval=cloud_state_poll_interval,
+            data_api_token=(
+                data_api_token.strip() if data_api_token is not None else None
+            ),
+            data_api_poll_interval=data_api_poll_interval,
             media_stale_timeout=media_stale_timeout,
             initial_frame_timeout=initial_frame_timeout,
             status_token=status_token.strip() if status_token is not None else None,
@@ -131,6 +139,12 @@ class BridgeConfig:
 
         if self.cloud_state_poll_interval <= 0:
             raise BridgeConfigError("cloud_state_poll_interval must be positive")
+
+        if self.data_api_poll_interval <= 0:
+            raise BridgeConfigError("data_api_poll_interval must be positive")
+
+        if self.data_api_token is not None and not self.data_api_token.strip():
+            raise BridgeConfigError("data_api_token must not be blank")
 
         if self.media_stale_timeout <= 0:
             raise BridgeConfigError("media_stale_timeout must be positive")
@@ -176,3 +190,8 @@ class BridgeConfig:
     def cloud_state_enabled(self) -> bool:
         """Whether cloud REST state polling should run."""
         return bool(self.cloud_email and self.cloud_password)
+
+    @property
+    def data_api_enabled(self) -> bool:
+        """Whether official Data API sleep analytics polling should run."""
+        return bool(self.data_api_token)

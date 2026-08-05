@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from cradlewise_local.__main__ import build_parser, main, resolve_cloud_credentials
+from cradlewise_local.__main__ import (
+    build_parser,
+    main,
+    resolve_cloud_credentials,
+    resolve_data_api_token,
+)
 from cradlewise_local.config import (
     BridgeConfig,
     BridgeConfigError,
@@ -74,6 +79,22 @@ def test_bridge_config_enables_cloud_state_with_credentials(tmp_path):
 
     assert config.cloud_state_enabled is True
     assert config.cloud_state_poll_interval == 60
+
+
+def test_bridge_config_enables_official_data_api_with_token(tmp_path):
+    certs_dir = tmp_path / "certs"
+    write_cert_set(certs_dir)
+
+    config = BridgeConfig.from_values(
+        cradle_id="cradle",
+        certs_dir=certs_dir,
+        output_url="rtsp://127.0.0.1:8554/cradlewise",
+        data_api_token="cw_test",
+        data_api_poll_interval=900,
+    )
+
+    assert config.data_api_enabled is True
+    assert config.data_api_poll_interval == 900
 
 
 def test_bridge_config_accepts_media_stale_timeout(tmp_path):
@@ -189,6 +210,18 @@ def test_bridge_cli_reads_cloud_credentials_from_files(tmp_path, monkeypatch):
         "user@example.com",
         "file-secret",
     )
+
+
+def test_bridge_cli_reads_data_api_token_from_file(tmp_path, monkeypatch):
+    token_file = tmp_path / "data-api-token"
+    token_file.write_text("cw_file_secret\n")
+    monkeypatch.setenv("CRADLEWISE_DATA_API_TOKEN", "")
+    monkeypatch.setenv("CRADLEWISE_DATA_API_TOKEN_FILE", str(token_file))
+    args = parse_bridge_args()
+
+    resolve_data_api_token(args)
+
+    assert args.data_api_token == "cw_file_secret"
 
 
 def test_bridge_cli_allows_mixed_file_and_direct_cloud_credentials(

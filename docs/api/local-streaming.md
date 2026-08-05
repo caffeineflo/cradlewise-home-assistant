@@ -143,7 +143,7 @@ Sent periodically to maintain the stream.
 | Type | URL | Credentials |
 |------|-----|-------------|
 | STUN | `stun:stun.l.google.com:19302` | None |
-| TURN | `turn:ec2-34-226-215-23.compute-1.amazonaws.com:3478` | user: `user`, password: `root` |
+| TURN | `turn:ec2-34-226-215-23.compute-1.amazonaws.com:3478` | App-embedded credentials (redacted) |
 
 Note: For local streaming, STUN/TURN are unnecessary. The ICE candidates resolve to local addresses directly. Our `stream_local.py` uses an empty `iceServers` list.
 
