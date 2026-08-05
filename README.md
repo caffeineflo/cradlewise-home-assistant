@@ -15,6 +15,10 @@ This is pre-release software running in a live Home Assistant setup. The code is
 being prepared for a public custom HACS release before applying to the default
 HACS catalog.
 
+CI runs hassfest on every change. The HACS validator reads repository files
+through GitHub's public raw-content endpoint, so that step remains present but
+activates only after the repository becomes public. It has no ignored checks.
+
 Working now:
 
 - Local H264 video copied to RTSP without re-encoding

@@ -55,6 +55,16 @@ def test_ci_runs_lint_and_home_assistant_validation():
     )
 
 
+def test_hacs_validation_activates_when_repository_is_public():
+    workflow = Path(".github/workflows/tests.yml").read_text()
+    hacs_step = workflow.split("      - name: Run HACS validation", 1)[1].split(
+        "\n\n", 1
+    )[0]
+
+    assert "if: github.event.repository.private == false" in hacs_step
+    assert "ignore:" not in hacs_step
+
+
 def test_dockerfile_runs_as_non_root_with_healthcheck():
     dockerfile = Path("Dockerfile").read_text()
 
