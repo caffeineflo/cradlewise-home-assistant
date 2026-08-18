@@ -268,4 +268,12 @@ class BridgeCommandHandler:
                 )
         if not isinstance(sound_synth["trackName"], str):
             raise CommandUnavailable("sound synthesizer track state is invalid")
-        return {"soundSynth": sound_synth}
+        runtime_desired = {"soundSynth": sound_synth}
+        if (
+            command == "music_playing"
+            and value is True
+            and state.get("music_mode") == 0
+            and state.get("music_level") == -1
+        ):
+            runtime_desired["musicLevel"] = 2
+        return runtime_desired

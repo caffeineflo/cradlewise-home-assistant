@@ -195,6 +195,47 @@ def test_command_handler_publishes_complete_app_shaped_sound_synth_state():
     ]
 
 
+def test_command_handler_starts_auto_mode_music_at_app_default_level():
+    handler = BridgeCommandHandler(
+        state_provider=lambda: {
+            "device_state": {
+                "music_playing": False,
+                "music_mode": 0,
+                "music_level": -1,
+                "music_volume": 1,
+                "music_mood": "Calming Rain",
+                "sound_ambience_raw": 0,
+                "sound_color_raw": 1,
+                "sound_heartbeat_volume": 100,
+                "sound_breath_volume": 0,
+            }
+        }
+    )
+    published = []
+    handler.set_publisher(published.append)
+
+    handler.handle_request({"command": "music_playing", "value": True})
+
+    assert published == [
+        {
+            "state": {
+                "desired": {
+                    "soundSynth": {
+                        "play": True,
+                        "ambience": 0,
+                        "color": 1,
+                        "heartbeatVolume": 100,
+                        "breathVolume": 0,
+                        "volume": 1,
+                        "trackName": "Calming Rain",
+                    },
+                    "musicLevel": 2,
+                }
+            }
+        }
+    ]
+
+
 def test_status_http_server_serves_command_endpoint(caplog):
     store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
     handler = BridgeCommandHandler()
