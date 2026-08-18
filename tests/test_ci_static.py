@@ -16,6 +16,14 @@ def test_dockerfile_runs_the_copied_source_instead_of_a_cached_project_wheel():
     assert 'ENTRYPOINT ["python", "-m", "cradlewise_local"]' in dockerfile
 
 
+def test_dockerfile_installs_mqtt_ca_pin_console_script():
+    dockerfile = Path("Dockerfile").read_text()
+    source_stage = dockerfile.split("COPY cradlewise_local ./cradlewise_local", 1)[1]
+
+    assert "uv sync --frozen --no-dev" in source_stage
+    assert "test -x /app/.venv/bin/cradlewise-pin-mqtt-ca" in source_stage
+
+
 def test_ci_builds_and_publishes_bridge_image():
     workflow = Path(".github/workflows/tests.yml").read_text()
 
