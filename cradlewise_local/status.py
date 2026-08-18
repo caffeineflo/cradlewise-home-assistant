@@ -1239,6 +1239,40 @@ class BridgeStatusStore:
     _sleep_analytics_updated_at: float | None = None
     _sleep_analytics_error: str | None = None
     _beacon: dict[str, Any] | None = None
+    _last_bridge_error: str | None = None
+    _reconnect_attempts: int = 0
+
+    def begin_connection_attempt(self) -> None:
+        """Clear attempt-local state before reconnecting to the crib."""
+        with self._lock:
+            self._mqtt_connected = False
+            self._webrtc_connection_state = "new"
+            self._ice_connection_state = "new"
+            self._video_width = None
+            self._video_height = None
+            self._video_frames = 0
+            self._audio_track = False
+            self._audio_frames = 0
+            self._last_video_frame_at = None
+            self._last_audio_frame_at = None
+            self._last_mqtt_message_at = None
+            self._stream_started_at = None
+            self._last_snapshot_jpeg = None
+            self._last_snapshot_at = None
+            self._sink_started = False
+            self._sink_healthy = False
+            self._sink_error = None
+            self._sink_last_video_write_at = None
+            self._sink_last_audio_write_at = None
+            self._sink_awaiting_h264_sync = False
+            self._sink_dropped_video_frames = 0
+
+    def mark_reconnecting(self, error: str) -> None:
+        """Record a failed local bridge attempt without stopping the status API."""
+        with self._lock:
+            self._mqtt_connected = False
+            self._last_bridge_error = error
+            self._reconnect_attempts += 1
 
     def set_mqtt_connected(self, connected: bool) -> None:
         with self._lock:
@@ -1269,6 +1303,7 @@ class BridgeStatusStore:
         with self._lock:
             self._video_frames += 1
             self._last_video_frame_at = _now()
+            self._last_bridge_error = None
 
     def update_snapshot(self, jpeg: bytes) -> None:
         with self._lock:
@@ -1478,6 +1513,8 @@ class BridgeStatusStore:
                     "crib_ip": self.crib_ip,
                     "healthy": healthy,
                     "uptime_seconds": int(now - self.started_at),
+                    "last_error": self._last_bridge_error,
+                    "reconnect_attempts": self._reconnect_attempts,
                 },
                 "mqtt": {
                     "connected": self._mqtt_connected,

@@ -17,6 +17,9 @@ from .sinks import FfmpegRtspSink
 from .status import BridgeStatusHttpServer, BridgeStatusStore
 from .streamer import run_bridge
 
+RECONNECT_INITIAL_DELAY_SECONDS = 5
+RECONNECT_MAX_DELAY_SECONDS = 60
+
 
 def _env_int_default(name: str, default: int) -> str:
     """Return a string default so argparse validates environment values."""
@@ -187,6 +190,75 @@ async def monitor_media_freshness(
             raise RuntimeError(f"RTSP sink unhealthy: {error}")
 
 
+def build_rtsp_sink(config: BridgeConfig) -> FfmpegRtspSink:
+    """Create a fresh RTSP sink for one local bridge connection attempt."""
+    return FfmpegRtspSink(
+        output_url=config.output_url,
+        ffmpeg_path=config.ffmpeg_path,
+        frame_rate=config.frame_rate,
+        video_bitrate=config.video_bitrate,
+        enable_audio=config.enable_audio,
+    )
+
+
+async def supervise_local_bridge(
+    config: BridgeConfig,
+    store: BridgeStatusStore,
+    command_handler: BridgeCommandHandler | None,
+) -> None:
+    """Reconnect local MQTT, WebRTC, and RTSP without stopping the status API."""
+    reconnect_delay = RECONNECT_INITIAL_DELAY_SECONDS
+    while True:
+        store.begin_connection_attempt()
+        sink = build_rtsp_sink(config)
+        bridge_task = asyncio.create_task(
+            run_bridge(config, sink, store, command_handler),
+            name="cradlewise-local-bridge",
+        )
+        watchdog_task = asyncio.create_task(
+            monitor_media_freshness(
+                store,
+                config.media_stale_timeout,
+                config.initial_frame_timeout,
+                sink,
+            ),
+            name="cradlewise-media-watchdog",
+        )
+        attempt_tasks = {bridge_task, watchdog_task}
+        streamed_video = False
+        try:
+            done, _ = await asyncio.wait(
+                attempt_tasks,
+                return_when=asyncio.FIRST_EXCEPTION,
+            )
+            for task in done:
+                task.result()
+            raise RuntimeError("local bridge stopped unexpectedly")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            streamed_video = store.snapshot()["media"]["video_frames"] > 0
+            store.mark_reconnecting(str(exc))
+            logging.warning(
+                "Local bridge failed: %s; retrying in %d seconds",
+                exc,
+                reconnect_delay,
+            )
+        finally:
+            for task in attempt_tasks:
+                task.cancel()
+            await asyncio.gather(*attempt_tasks, return_exceptions=True)
+            sink.close()
+            store.update_sink_health(sink.health_snapshot())
+
+        await asyncio.sleep(reconnect_delay)
+        reconnect_delay = (
+            RECONNECT_INITIAL_DELAY_SECONDS
+            if streamed_video
+            else min(RECONNECT_MAX_DELAY_SECONDS, reconnect_delay * 2)
+        )
+
+
 async def async_main(args: argparse.Namespace) -> None:
     config = BridgeConfig.from_values(
         cradle_id=args.cradle_id,
@@ -208,13 +280,6 @@ async def async_main(args: argparse.Namespace) -> None:
         initial_frame_timeout=args.initial_frame_timeout,
         status_token=args.status_token,
     )
-    sink = FfmpegRtspSink(
-        output_url=config.output_url,
-        ffmpeg_path=config.ffmpeg_path,
-        frame_rate=config.frame_rate,
-        video_bitrate=config.video_bitrate,
-        enable_audio=config.enable_audio,
-    )
     store = BridgeStatusStore(
         cradle_id=config.cradle_id,
         crib_ip=config.crib_ip or "discovery",
@@ -235,17 +300,12 @@ async def async_main(args: argparse.Namespace) -> None:
         config.status_host,
         config.status_port,
     )
-    tasks = [asyncio.create_task(run_bridge(config, sink, store, command_handler))]
-    tasks.append(
+    tasks = [
         asyncio.create_task(
-            monitor_media_freshness(
-                store,
-                config.media_stale_timeout,
-                config.initial_frame_timeout,
-                sink,
-            )
+            supervise_local_bridge(config, store, command_handler),
+            name="cradlewise-local-supervisor",
         )
-    )
+    ]
     if config.cloud_state_enabled:
         tasks.append(asyncio.create_task(poll_cloud_state(config, store)))
     if config.data_api_enabled:

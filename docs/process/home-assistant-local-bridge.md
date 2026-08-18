@@ -112,6 +112,7 @@ The bridge requires the same cert layout as `stream_local.py`:
 ```
 certs/<cradle_id>/
   ca.pem
+  server_ca.pem  # Greengrass v2 firmware only
   client_cert.pem
   client_key.pem
   device_id
@@ -130,6 +131,12 @@ active RTSP sink are healthy; it returns 503 otherwise. When a bearer token is
 configured, `/state`, `/snapshot.jpg`, and `/command` require it. Stale
 snapshots are rejected, and commands are unavailable when no bearer token is
 configured.
+
+The API process remains available during a local crib outage. Local MQTT,
+WebRTC, and RTSP are recreated with bounded backoff while cloud state polling
+continues. `/state` exposes `bridge.last_error` and
+`bridge.reconnect_attempts`; `/health` stays at `503` until fresh video reaches
+the RTSP sink.
 
 ### Verified Production TLS Topology
 

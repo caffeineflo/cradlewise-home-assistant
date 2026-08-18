@@ -75,6 +75,7 @@ logging.basicConfig(
 log = logging.getLogger("stream_local")
 
 MQTT_PORT = 8883
+MQTT_SERVER_CA_FILE = "server_ca.pem"
 KEEPALIVE_INTERVAL_S = 5
 DEVICE_ID = uuid.uuid4().hex[:16]
 
@@ -296,6 +297,13 @@ def discover_crib_race(
     raise RuntimeError(f"Crib discovery failed: {detail}")
 
 
+def mqtt_server_ca_path(certs_dir: str | Path) -> Path:
+    """Prefer a pinned Greengrass v2 broker CA when one has been provisioned."""
+    directory = Path(certs_dir)
+    pinned_ca = directory / MQTT_SERVER_CA_FILE
+    return pinned_ca if pinned_ca.is_file() else directory / "ca.pem"
+
+
 def _stream_info(session_id):
     return {
         "applicationName": "live",
@@ -341,6 +349,7 @@ class CribStreamer:
     # -- MQTT layer --
 
     def _setup_mqtt(self):
+        server_ca = mqtt_server_ca_path(self.certs_dir)
         client = mqtt.Client(
             callback_api_version=CallbackAPIVersion.VERSION2,
             client_id=self.mqtt_client_id,
@@ -348,13 +357,16 @@ class CribStreamer:
             protocol=mqtt.MQTTv311,
         )
         client.tls_set(
-            ca_certs=str(self.certs_dir / "ca.pem"),
+            ca_certs=str(server_ca),
             certfile=str(self.certs_dir / "client_cert.pem"),
             keyfile=str(self.certs_dir / "client_key.pem"),
             tls_version=ssl.PROTOCOL_TLS_CLIENT,
         )
-        # Crib's cert won't match the IP as hostname
-        client.tls_insecure_set(True)
+        if server_ca.name == MQTT_SERVER_CA_FILE:
+            log.info("Using pinned MQTT server CA with hostname verification")
+        else:
+            # Legacy Greengrass broker certificates use a cradle ID as their CN.
+            client.tls_insecure_set(True)
 
         client.on_connect = self._on_connect
         client.on_message = self._on_message

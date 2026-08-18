@@ -61,6 +61,11 @@ The bridge gets normal device state directly from the crib's local MQTT
 shadow. Optional `CRADLEWISE_EMAIL` and `CRADLEWISE_PASSWORD` credentials can
 provide a cloud fallback, but they are not required for normal operation.
 
+Local connection failures do not terminate the status API or cloud pollers.
+The bridge retries MQTT, WebRTC, and RTSP with bounded backoff, reports the
+last error through `/state`, and returns `503` from `/health` until media is
+healthy again.
+
 The repository intentionally keeps two runtime layers separate without forcing
 a multi-repository release. `cradlewise_local/` owns crib protocols, streaming,
 cloud fallback, and official Data API normalization. The HACS-installed
@@ -120,11 +125,27 @@ The script prompts for your Cradlewise email and password. You can also set
 `CRADLEWISE_EMAIL` and `CRADLEWISE_PASSWORD` in your shell if you're running it
 non-interactively.
 
+Cribs running newer Greengrass v2 firmware present a rotating MQTT broker
+certificate signed by a separate, long-lived core CA. Pin that CA once from
+the same trusted LAN as the crib:
+
+```bash
+uv run cradlewise-pin-mqtt-ca \
+  --ip <crib_ip> \
+  --certs-dir certs/<cradle_id>
+```
+
+The command validates the broker identity, certificate signatures, validity
+period, and crib IP before writing `server_ca.pem`. It refuses to replace a
+different existing pin unless you pass `--replace` after verifying the crib's
+firmware-driven CA change.
+
 That creates:
 
 ```text
 certs/<cradle_id>/
   ca.pem
+  server_ca.pem  # Greengrass v2 firmware only
   client_cert.pem
   client_key.pem
   device_id

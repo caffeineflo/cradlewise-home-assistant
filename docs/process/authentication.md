@@ -109,7 +109,9 @@ files are downloaded from the `cradlewise-device-certs` bucket:
 1. **Client certificate** (saved as `client_cert.pem`)
 2. **Client private key** (saved as `client_key.pem`)
 
-The Group CA cert from step 4 is saved as `ca.pem`.
+The legacy Group CA cert from step 4 is saved as `ca.pem`. Newer Greengrass v2
+firmware uses a separate broker core CA; pin it as `server_ca.pem` with
+`cradlewise-pin-mqtt-ca` after provisioning the client credentials.
 
 ## Step 6: Register Device
 
@@ -136,10 +138,12 @@ The certificates are standard X.509:
 |------|-----|--------|----------|
 | `ca.pem` | `{awsAccountId}:{greengrassGroupId}` | Self-signed | ~80 years |
 | `client_cert.pem` | `AWS IoT Certificate` | Amazon Root CA | ~25 years |
+| `server_ca.pem` | `Greengrass Core CA` | Self-signed | Firmware-specific |
 | `client_key.pem` | N/A (RSA 2048-bit private key) | N/A | N/A |
 
-The CA cert is the Greengrass Group CA. The crib's broker presents a cert
-signed by this CA with CN `{cradleId}_Core`.
+The API-provided CA is the legacy Greengrass Group CA. Legacy brokers present a
+certificate signed by this CA with CN `{cradleId}_Core`. Greengrass v2 brokers
+instead present a rotating certificate signed by a long-lived local core CA.
 
 ## What Happens on the Crib Side
 
@@ -160,6 +164,7 @@ After `fetch_certs.py` completes:
 ```
 certs/{cradle_id}/
   ca.pem           # Greengrass Group CA
+  server_ca.pem    # Pinned Greengrass v2 core CA, when applicable
   client_cert.pem  # Device certificate
   client_key.pem   # Device private key (mode 0600)
   device_id        # Device UUID (used as MQTT client ID)

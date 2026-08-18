@@ -61,6 +61,40 @@ def test_status_store_marks_bridge_unhealthy_when_sink_stops_writing(monkeypatch
     assert snapshot["bridge"]["healthy"] is False
 
 
+def test_connection_attempt_clears_stale_local_media_state():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    store.set_mqtt_connected(True)
+    store.mark_stream_started()
+    store.increment_video_frames()
+    store.increment_audio_frames()
+    store.update_snapshot(b"jpeg")
+
+    store.begin_connection_attempt()
+    snapshot = store.snapshot()
+
+    assert (
+        snapshot["mqtt"]["connected"],
+        snapshot["media"]["video_frames"],
+        snapshot["media"]["audio_frames"],
+        store.snapshot_jpeg(),
+    ) == (False, 0, 0, None)
+
+
+def test_reconnect_error_is_exposed_and_cleared_by_video():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    store.mark_reconnecting("TLS failed")
+
+    failed = store.snapshot()["bridge"]
+    store.increment_video_frames()
+    recovered = store.snapshot()["bridge"]
+
+    assert (
+        failed["last_error"],
+        failed["reconnect_attempts"],
+        recovered["last_error"],
+    ) == ("TLS failed", 1, None)
+
+
 def test_status_store_caches_latest_snapshot_jpeg():
     store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
     jpeg = b"\xff\xd8frame\xff\xd9"

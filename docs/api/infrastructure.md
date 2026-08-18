@@ -102,17 +102,21 @@ JanusClientConfigReceived
 
 | Certificate | CN | Signed By | Purpose |
 |-------------|-----|-----------|---------|
-| Group CA (`ca.pem`) | `{awsAccountId}:{greengrassGroupId}` | Self-signed | Validates broker cert |
+| Legacy group CA (`ca.pem`) | `{awsAccountId}:{greengrassGroupId}` | Self-signed | Validates legacy broker cert |
+| Greengrass v2 core CA (`server_ca.pem`) | `Greengrass Core CA` | Self-signed | Validates rotating v2 broker cert |
 | Client cert (`client_cert.pem`) | `AWS IoT Certificate` | Amazon Root CA | Client authentication |
-| Broker cert (crib) | `{cradleId}_Core` | Group CA | Server identity |
+| Legacy broker cert (crib) | `{cradleId}_Core` | Group CA | Server identity |
+| Greengrass v2 broker cert | `aws.greengrass.clientdevices.mqtt.Moquette` | Greengrass Core CA | Server identity with crib IP SAN |
 
 - Client key is RSA 2048-bit
 - Certificates provisioned via `/cradles/pairedUsers/v3` API (see `docs/process/authentication.md`)
 - Stored on Android in a keystore at `{filesDir}/certificates/{cradleId}_keystore_name`
 - On disk (our scripts): PEM files in `certs/{cradleId}/`
 - MQTT client ID must match the device UUID ("thing name") -- Greengrass enforces this
-- TLS v1.2, no ALPN, `tls_insecure_set(True)` to skip hostname verification
-  (the broker cert CN is `{cradleId}_Core`, not a hostname)
+- TLS v1.2 and no ALPN. Legacy certificates require hostname verification to
+  be disabled because their CN is not a hostname. Greengrass v2 uses the
+  separately pinned `server_ca.pem` and verifies the configured crib IP
+  against the broker certificate SAN.
 
 ## Third-Party Services
 

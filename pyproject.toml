@@ -29,6 +29,7 @@ ha-test = [
 
 [project.scripts]
 cradlewise-local = "cradlewise_local.__main__:main"
+cradlewise-pin-mqtt-ca = "cradlewise_local.mqtt_ca:main"
 
 [project.urls]
 Homepage = "https://github.com/caffeineflo/cradlewise-local"

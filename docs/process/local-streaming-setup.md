@@ -54,6 +54,24 @@ a few minutes to propagate. If MQTT gives "Not Authorized", wait and retry.
 
 You only need to do this once. The certificates are valid for decades.
 
+### Greengrass v2 broker CA
+
+Newer crib firmware uses a Greengrass v2 core CA instead of the older group CA
+returned during device provisioning. Its MQTT leaf certificate rotates, so do
+not pin the leaf and do not disable certificate verification. Pin the
+long-lived core CA while connected to the trusted crib LAN:
+
+```bash
+uv run cradlewise-pin-mqtt-ca \
+  --ip <crib_ip> \
+  --certs-dir certs/<cradle_id>
+```
+
+This creates `server_ca.pem`. The streamer prefers it over `ca.pem` and enables
+normal hostname/IP verification. A different existing pin is never replaced
+unless you explicitly pass `--replace` after confirming a firmware-driven CA
+change.
+
 ## Step 2: Find Your Crib's IP
 
 If the crib is on the same subnet, `stream_local.py` can discover it
@@ -133,7 +151,10 @@ Typical output:
 
 - **First run?** Wait a few minutes for the Greengrass deployment to propagate
   after `fetch_certs.py`, then try again.
-- **Certs expired?** Re-run `fetch_certs.py` to get fresh certificates.
+- **`self-signed certificate in certificate chain`?** Run
+  `cradlewise-pin-mqtt-ca` for Greengrass v2 firmware. Re-running
+  `fetch_certs.py` alone can still return the legacy group CA.
+- **Client cert expired?** Re-run `fetch_certs.py` to get fresh credentials.
 - **Wrong cradle ID?** Check `certs/` directory for the correct UUID.
 
 ### UDP discovery fails
