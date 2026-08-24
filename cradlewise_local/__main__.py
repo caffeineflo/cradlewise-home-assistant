@@ -238,11 +238,14 @@ async def supervise_local_bridge(
             raise
         except Exception as exc:
             streamed_video = store.snapshot()["media"]["video_frames"] > 0
+            retry_delay = (
+                RECONNECT_INITIAL_DELAY_SECONDS if streamed_video else reconnect_delay
+            )
             store.mark_reconnecting(str(exc))
             logging.warning(
                 "Local bridge failed: %s; retrying in %d seconds",
                 exc,
-                reconnect_delay,
+                retry_delay,
             )
         finally:
             for task in attempt_tasks:
@@ -251,7 +254,7 @@ async def supervise_local_bridge(
             sink.close()
             store.update_sink_health(sink.health_snapshot())
 
-        await asyncio.sleep(reconnect_delay)
+        await asyncio.sleep(retry_delay)
         reconnect_delay = (
             RECONNECT_INITIAL_DELAY_SECONDS
             if streamed_video

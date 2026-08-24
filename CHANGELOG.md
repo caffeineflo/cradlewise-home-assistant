@@ -22,6 +22,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - Local MQTT, WebRTC, and RTSP failures now reconnect with bounded backoff
   without stopping the status API or optional cloud polling.
+- A previously healthy stream now retries with the initial delay instead of
+  inheriting an outage's maximum reconnect delay.
 - Starting music in smart mode now selects the same default sound level as the
   Android app when no smart level has been chosen yet.
 - Limited the default Home Assistant surface to high-value entities and kept

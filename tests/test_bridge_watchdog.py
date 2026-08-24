@@ -129,3 +129,50 @@ def test_local_bridge_supervisor_retries_without_exiting(monkeypatch, tmp_path):
     asyncio.run(run_supervisor())
 
     assert attempts == 2
+
+
+def test_local_bridge_supervisor_resets_delay_before_retrying_recovered_stream(
+    monkeypatch, tmp_path
+):
+    certs_dir = tmp_path / "certs"
+    certs_dir.mkdir()
+    for name in ("ca.pem", "client_cert.pem", "client_key.pem", "device_id"):
+        (certs_dir / name).write_text("test")
+    config = BridgeConfig.from_values(
+        cradle_id="cradle-1",
+        crib_ip="192.0.2.10",
+        certs_dir=certs_dir,
+        output_url="rtsp://127.0.0.1:8554/cradlewise",
+    )
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    attempts = 0
+    delays = []
+
+    async def fail_bridge(_config, _sink, attempt_store, _command_handler):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 3:
+            attempt_store.increment_video_frames()
+        raise RuntimeError("crib unavailable")
+
+    async def idle_watchdog(*_args, **_kwargs):
+        await asyncio.Future()
+
+    async def record_retry_delay(delay):
+        delays.append(delay)
+        if attempts >= 3:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr("cradlewise_local.__main__.run_bridge", fail_bridge)
+    monkeypatch.setattr(
+        "cradlewise_local.__main__.monitor_media_freshness", idle_watchdog
+    )
+    monkeypatch.setattr("cradlewise_local.__main__.asyncio.sleep", record_retry_delay)
+
+    async def run_supervisor():
+        with pytest.raises(asyncio.CancelledError):
+            await supervise_local_bridge(config, store, command_handler=None)
+
+    asyncio.run(run_supervisor())
+
+    assert delays == [5, 10, 5]
