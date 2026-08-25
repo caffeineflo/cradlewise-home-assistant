@@ -67,8 +67,8 @@ provide a cloud fallback, but they are not required for normal operation.
 
 Local connection failures do not terminate the status API or cloud pollers.
 The bridge retries MQTT, WebRTC, and RTSP with bounded backoff, reports the
-last error through `/state`, and returns `503` from `/health` until media is
-healthy again.
+last error through `/state`, keeps `/live` available for container routing, and
+returns `503` from `/health` until media is healthy again.
 
 The repository intentionally keeps two runtime layers separate without forcing
 a multi-repository release. `cradlewise_local/` owns crib protocols, streaming,
@@ -206,7 +206,7 @@ and client metadata.
 
 The status server binds to loopback by default. The Compose example explicitly
 binds it inside the container and requires `CRADLEWISE_STATUS_TOKEN`. Loopback
-container health checks can call `/health` without a token; remote health,
+container liveness checks can call `/live` without a token; remote liveness, health,
 info, state, metrics, snapshot, and command requests require the bearer token.
 Commands are disabled when no token is configured. MediaMTX allows only the
 publisher credential to publish and only the reader credential to consume the
@@ -214,8 +214,9 @@ publisher credential to publish and only the reader credential to consume the
 with `no-new-privileges`, read-only root filesystems, bounded resources, and
 rotated container logs. MediaMTX is pinned by both version and digest.
 
-The bridge returns HTTP 503 from `/health` when MQTT, WebRTC/video freshness,
-or the active RTSP sink is unhealthy. It also rejects stale snapshots and marks
+The bridge returns HTTP 200 from `/live` while its API process is available and
+HTTP 503 from `/health` when MQTT, WebRTC/video freshness, or the active RTSP
+sink is unhealthy. It also rejects stale snapshots and marks
 stale local/cloud state unavailable. A successful command response means the
 APK-shaped desired-shadow update was queued for MQTT publication; the next
 reported shadow update is the confirmation of the resulting device state.

@@ -128,8 +128,8 @@ accounts have separate permissions for the `cradlewise` path.
 The base Compose example publishes plaintext ports `8088` and `8560` and is
 only for development or a trusted LAN. The HTTP server binds to loopback by
 default; Compose explicitly binds it inside the container and requires a
-bearer token. Docker's loopback `/health` probe does not need the token, while
-remote `/health`, `/info`, `/state`, `/metrics`, `/snapshot.jpg`, and `/command`
+bearer token. Docker's loopback `/live` probe does not need the token, while
+remote `/live`, `/health`, `/info`, `/state`, `/metrics`, `/snapshot.jpg`, and `/command`
 requests require it. Stale snapshots are rejected, and commands are unavailable
 when no bearer token is configured.
 

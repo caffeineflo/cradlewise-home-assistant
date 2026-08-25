@@ -1664,6 +1664,8 @@ class BridgeStatusHttpServer:
                 "metrics": metrics_enabled,
             },
             "endpoints": {
+                "liveness": "/live",
+                "health": "/health",
                 "state": "/state",
                 "snapshot": "/snapshot.jpg",
                 "command": "/command",
@@ -1714,12 +1716,19 @@ class BridgeStatusHttpServer:
                 self.wfile.write(body)
 
             def do_GET(self) -> None:
-                if self.path == "/health":
+                if self.path in {"/live", "/health"}:
                     if (
                         bearer_token is not None
                         and not self._client_is_loopback()
                         and not self._require_authorization()
                     ):
+                        return
+                    if self.path == "/live":
+                        self._send_bytes(
+                            HTTPStatus.OK,
+                            b'{"live": true}',
+                            "application/json",
+                        )
                         return
                     healthy = store.snapshot()["bridge"]["healthy"]
                     body = json.dumps({"healthy": healthy}).encode()

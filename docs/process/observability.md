@@ -7,6 +7,8 @@ by default.
 ## Defaults
 
 - Bridge logs stay on stdout for Docker or the service supervisor to collect.
+- `/live` reports API-process liveness so Docker and reverse proxies keep state
+  and control routes available during a media outage.
 - `/health` reports semantic bridge health. Loopback container probes do not
   need credentials; remote monitors must send the bridge bearer token.
 - `/metrics` returns 404 unless `CRADLEWISE_METRICS_ENABLED=true`.
@@ -30,6 +32,9 @@ Authorization: Bearer <CRADLEWISE_STATUS_TOKEN>
 HTTP 200 means MQTT, WebRTC, recent video, and the active RTSP sink are healthy.
 HTTP 503 means the API is reachable but one of those semantic checks is failing.
 This works with Uptime Kuma or any monitor that can attach an HTTP header.
+
+Use `GET /live` only for process and container routing checks. It returns HTTP
+200 while the API server is responding and does not imply that media is healthy.
 
 ## Pull metrics
 

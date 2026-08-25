@@ -85,7 +85,11 @@ def test_hacs_validation_activates_when_repository_is_public():
 def test_dockerfile_runs_as_non_root_with_healthcheck():
     dockerfile = Path("Dockerfile").read_text()
 
-    assert "USER 10001:10001" in dockerfile and "HEALTHCHECK" in dockerfile
+    assert (
+        "USER 10001:10001" in dockerfile
+        and "HEALTHCHECK" in dockerfile
+        and "127.0.0.1:8080/live" in dockerfile
+    )
 
 
 def test_compose_pins_and_authenticates_media_server():

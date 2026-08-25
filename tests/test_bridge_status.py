@@ -387,6 +387,24 @@ def test_health_is_unauthenticated_and_returns_503_until_healthy():
     assert exc_info.value.code == 503
 
 
+def test_liveness_is_independent_of_media_readiness():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    server = BridgeStatusHttpServer(
+        store, "127.0.0.1", _free_port(), bearer_token="secret"
+    )
+    server.start()
+
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{server.port}/live", timeout=2
+        ) as response:
+            body = json.load(response)
+    finally:
+        server.close()
+
+    assert (response.status, body) == (200, {"live": True})
+
+
 def test_status_http_server_rejects_stale_snapshot(monkeypatch):
     now = 1000.0
     monkeypatch.setattr("cradlewise_local.status._now", lambda: now)

@@ -20,6 +20,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - A versioned, authenticated bridge `/info` contract for compact HA setup.
 - Opt-in authenticated Prometheus metrics with no identifying labels.
 - Opt-in Sentry-compatible fatal error reporting with privacy redaction.
+- A dedicated `/live` probe that keeps API routing available during media
+  outages without weakening semantic `/health` checks.
 
 ### Changed
 
