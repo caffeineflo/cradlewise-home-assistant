@@ -24,6 +24,15 @@ def test_dockerfile_installs_mqtt_ca_pin_console_script():
     assert "test -x /app/.venv/bin/cradlewise-pin-mqtt-ca" in source_stage
 
 
+def test_bridge_image_includes_inactive_observability_extra():
+    dockerfile = Path("Dockerfile").read_text()
+    project = Path("pyproject.toml").read_text()
+
+    assert (
+        "--extra observability" in dockerfile and "sentry-sdk>=2.68.0,<3.0.0" in project
+    )
+
+
 def test_ci_builds_and_publishes_bridge_image():
     workflow = Path(".github/workflows/tests.yml").read_text()
 

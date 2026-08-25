@@ -63,6 +63,9 @@ def test_media_watchdog_raises_on_failed_peer_connection(monkeypatch):
 
 
 def test_main_exits_process_on_fatal_bridge_error(monkeypatch):
+    captured = []
+    flushes = []
+
     async def fail_bridge(args):
         raise RuntimeError("bridge failed")
 
@@ -80,12 +83,25 @@ def test_main_exits_process_on_fatal_bridge_error(monkeypatch):
         ],
     )
     monkeypatch.setattr("cradlewise_local.__main__.async_main", fail_bridge)
+    monkeypatch.setattr(
+        "cradlewise_local.__main__.initialize_error_reporting",
+        lambda dsn, environment: type(
+            "Reporter",
+            (),
+            {
+                "enabled": True,
+                "capture_exception": lambda self, exc: captured.append(str(exc)),
+                "flush": lambda self: flushes.append(True),
+            },
+        )(),
+    )
     monkeypatch.setattr("cradlewise_local.__main__.os._exit", fake_exit)
 
     with pytest.raises(SystemExit) as exc:
         main()
 
     assert exc.value.code == 1
+    assert (captured, bool(flushes)) == (["bridge failed"], True)
 
 
 def test_local_bridge_supervisor_retries_without_exiting(monkeypatch, tmp_path):

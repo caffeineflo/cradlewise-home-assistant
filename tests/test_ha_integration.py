@@ -29,7 +29,9 @@ from custom_components.cradlewise_local import async_migrate_entry
 from custom_components.cradlewise_local.camera import CradlewiseBridgeCamera
 from custom_components.cradlewise_local.const import (
     CONF_BEARER_TOKEN,
+    CONF_BRIDGE_API_VERSION,
     CONF_BRIDGE_STATUS_URL,
+    CONF_BRIDGE_VERSION,
     CONF_CRADLE_ID,
     CONF_SNAPSHOT_URL,
     CONF_STREAM_URL,
@@ -44,6 +46,7 @@ pytestmark = [
 CRADLE_ID = "00000000-0000-4000-8000-000000000001"
 BRIDGE_URL = "http://bridge.test:8088"
 STATE_URL = f"{BRIDGE_URL}/state"
+INFO_URL = f"{BRIDGE_URL}/info"
 STREAM_URL = "rtsp://bridge.test:8560/cradlewise"
 TOKEN = "test-bearer-token"
 
@@ -111,16 +114,30 @@ def _bridge_payload(*, updated_at: float | None = None) -> dict[str, Any]:
     }
 
 
+def _bridge_info(
+    *,
+    cradle_id: str = CRADLE_ID,
+    stream_url: str = STREAM_URL,
+) -> dict[str, Any]:
+    return {
+        "api_version": 1,
+        "bridge_version": "0.1.0",
+        "device": {"id": cradle_id},
+        "capabilities": {"camera": True},
+        "endpoints": {
+            "state": "/state",
+            "snapshot": "/snapshot.jpg",
+        },
+        "stream": {"url": stream_url},
+    }
+
+
 def _user_input(
     *,
     bridge_url: str = BRIDGE_URL,
     token: str = TOKEN,
-    name: str = "Cradlewise Local",
 ) -> dict[str, str]:
     return {
-        CONF_NAME: name,
-        CONF_CRADLE_ID: CRADLE_ID,
-        CONF_STREAM_URL: STREAM_URL,
         CONF_BRIDGE_STATUS_URL: bridge_url,
         CONF_BEARER_TOKEN: token,
     }
@@ -131,10 +148,16 @@ def _entry_data(
     bridge_url: str = BRIDGE_URL,
     token: str = TOKEN,
     name: str = "Cradlewise Local",
-) -> dict[str, str]:
+) -> dict[str, Any]:
     return {
-        **_user_input(bridge_url=bridge_url, token=token, name=name),
+        CONF_NAME: name,
+        CONF_CRADLE_ID: CRADLE_ID,
+        CONF_STREAM_URL: STREAM_URL,
+        CONF_BRIDGE_STATUS_URL: bridge_url,
+        CONF_BEARER_TOKEN: token,
         CONF_SNAPSHOT_URL: f"{bridge_url}/snapshot.jpg",
+        CONF_BRIDGE_API_VERSION: 1,
+        CONF_BRIDGE_VERSION: "0.1.0",
     }
 
 
@@ -150,7 +173,7 @@ async def _setup_entry(
         title="Cradlewise Local",
         unique_id=CRADLE_ID,
         data=_entry_data(),
-        version=2,
+        version=3,
     )
     entry.add_to_hass(hass)
 
@@ -188,7 +211,7 @@ async def test_config_flow_creates_entry_and_sends_bearer_token(
     hass: HomeAssistant,
     aioclient_mock: Any,
 ) -> None:
-    aioclient_mock.get(STATE_URL, json=_bridge_payload())
+    aioclient_mock.get(INFO_URL, json=_bridge_info())
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -210,7 +233,7 @@ async def test_config_flow_maps_rejected_token_to_invalid_auth(
     hass: HomeAssistant,
     aioclient_mock: Any,
 ) -> None:
-    aioclient_mock.get(STATE_URL, status=401)
+    aioclient_mock.get(INFO_URL, status=401)
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -222,6 +245,23 @@ async def test_config_flow_maps_rejected_token_to_invalid_auth(
     assert result["errors"] == {"base": "invalid_auth"}
 
 
+async def test_config_flow_rejects_an_unsupported_bridge_api(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+) -> None:
+    info = _bridge_info()
+    info["api_version"] = 2
+    aioclient_mock.get(INFO_URL, json=info)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+        data=_user_input(),
+    )
+
+    assert result["errors"] == {"base": "unsupported_bridge"}
+
+
 async def test_config_flow_aborts_duplicate_cradle(
     hass: HomeAssistant,
     aioclient_mock: Any,
@@ -231,10 +271,10 @@ async def test_config_flow_aborts_duplicate_cradle(
         title="Existing Cradlewise",
         unique_id=CRADLE_ID,
         data=_entry_data(),
-        version=2,
+        version=3,
     )
     existing.add_to_hass(hass)
-    aioclient_mock.get(STATE_URL, json=_bridge_payload())
+    aioclient_mock.get(INFO_URL, json=_bridge_info())
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -246,7 +286,7 @@ async def test_config_flow_aborts_duplicate_cradle(
     assert result["reason"] == "already_configured"
 
 
-async def test_reconfigure_updates_urls_name_and_token(
+async def test_reconfigure_updates_urls_and_token_without_changing_identity(
     hass: HomeAssistant,
     aioclient_mock: Any,
 ) -> None:
@@ -255,10 +295,11 @@ async def test_reconfigure_updates_urls_name_and_token(
         title="Old Cradlewise",
         unique_id=CRADLE_ID,
         data=_entry_data(token="old-token", name="Old Cradlewise"),
-        version=2,
+        version=3,
     )
     entry.add_to_hass(hass)
     new_bridge_url = "http://new-bridge.test:8088"
+    aioclient_mock.get(f"{new_bridge_url}/info", json=_bridge_info())
     aioclient_mock.get(f"{new_bridge_url}/state", json=_bridge_payload())
 
     initial = await hass.config_entries.flow.async_init(
@@ -273,7 +314,6 @@ async def test_reconfigure_updates_urls_name_and_token(
         user_input=_user_input(
             bridge_url=new_bridge_url,
             token="new-token",
-            name="Nursery Cradlewise",
         ),
     )
 
@@ -281,7 +321,7 @@ async def test_reconfigure_updates_urls_name_and_token(
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_BRIDGE_STATUS_URL] == new_bridge_url
     assert entry.data[CONF_BEARER_TOKEN] == "new-token"
-    assert entry.data[CONF_NAME] == "Nursery Cradlewise"
+    assert entry.data[CONF_NAME] == "Old Cradlewise"
     assert entry.data[CONF_SNAPSHOT_URL] == f"{new_bridge_url}/snapshot.jpg"
     assert aioclient_mock.mock_calls[-1][3]["Authorization"] == "Bearer new-token"
 
@@ -461,7 +501,7 @@ async def test_two_cradles_keep_separate_config_entry_identity(
             **_entry_data(bridge_url=second_bridge_url, name="Second Cradlewise"),
             CONF_CRADLE_ID: second_cradle_id,
         },
-        version=2,
+        version=3,
     )
     second_entry.add_to_hass(hass)
 
@@ -587,4 +627,28 @@ async def test_version_one_migration_removes_duplicates_and_disables_diagnostics
     assert migrated_diagnostic is not None
     assert migrated_diagnostic.disabled_by is er.RegistryEntryDisabler.INTEGRATION
     assert registry.async_get(retained.entity_id) is not None
-    assert (entry.version, entry.minor_version) == (2, 1)
+    assert (entry.version, entry.minor_version) == (3, 0)
+
+
+async def test_version_two_migration_preserves_config_and_unique_id(
+    hass: HomeAssistant,
+) -> None:
+    original_data = _entry_data()
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Cradlewise Local",
+        unique_id=CRADLE_ID,
+        data=original_data,
+        version=2,
+        minor_version=1,
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert (
+        entry.unique_id,
+        dict(entry.data),
+        entry.version,
+        entry.minor_version,
+    ) == (CRADLE_ID, original_data, 3, 0)

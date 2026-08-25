@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -61,7 +62,7 @@ class BridgeConfig:
     frame_rate: int = 10
     video_bitrate: str = "2500k"
     enable_audio: bool = True
-    status_host: str = "0.0.0.0"
+    status_host: str = "127.0.0.1"
     status_port: int = 8080
     cloud_email: str | None = None
     cloud_password: str | None = None
@@ -71,6 +72,8 @@ class BridgeConfig:
     media_stale_timeout: int = 90
     initial_frame_timeout: int = 15
     status_token: str | None = None
+    advertised_stream_url: str | None = None
+    metrics_enabled: bool = False
 
     @classmethod
     def from_values(
@@ -84,7 +87,7 @@ class BridgeConfig:
         frame_rate: int = 10,
         video_bitrate: str = "2500k",
         enable_audio: bool = True,
-        status_host: str = "0.0.0.0",
+        status_host: str = "127.0.0.1",
         status_port: int = 8080,
         cloud_email: str | None = None,
         cloud_password: str | None = None,
@@ -94,6 +97,8 @@ class BridgeConfig:
         media_stale_timeout: int = 90,
         initial_frame_timeout: int = 15,
         status_token: str | None = None,
+        advertised_stream_url: str | None = None,
+        metrics_enabled: bool = False,
     ) -> BridgeConfig:
         """Build and validate config from CLI-style values."""
         if not output_url:
@@ -122,6 +127,12 @@ class BridgeConfig:
             media_stale_timeout=media_stale_timeout,
             initial_frame_timeout=initial_frame_timeout,
             status_token=status_token.strip() if status_token is not None else None,
+            advertised_stream_url=(
+                advertised_stream_url.strip()
+                if advertised_stream_url is not None
+                else None
+            ),
+            metrics_enabled=metrics_enabled,
         )
         config.validate()
         return config
@@ -155,6 +166,14 @@ class BridgeConfig:
         if self.status_token is not None and not self.status_token.strip():
             raise BridgeConfigError("status_token must not be blank")
 
+        if not self._status_host_is_loopback and self.status_token is None:
+            raise BridgeConfigError(
+                "status_token is required when status_host is not loopback"
+            )
+
+        if self.metrics_enabled and self.status_token is None:
+            raise BridgeConfigError("metrics require a status token")
+
         if bool(self.cloud_email) != bool(self.cloud_password):
             raise BridgeConfigError(
                 "cloud_email and cloud_password must be provided together"
@@ -168,6 +187,13 @@ class BridgeConfig:
         parsed = urlparse(self.output_url)
         if parsed.scheme != "rtsp" or not parsed.netloc:
             raise BridgeConfigError("output_url must be an rtsp:// URL")
+
+        if self.advertised_stream_url is not None:
+            advertised = urlparse(self.advertised_stream_url)
+            if advertised.scheme not in {"rtsp", "rtsps"} or not advertised.netloc:
+                raise BridgeConfigError(
+                    "advertised_stream_url must be an rtsp:// or rtsps:// URL"
+                )
 
         missing = [path.name for path in self.required_cert_paths if not path.exists()]
         if missing:
@@ -195,3 +221,13 @@ class BridgeConfig:
     def data_api_enabled(self) -> bool:
         """Whether official Data API sleep analytics polling should run."""
         return bool(self.data_api_token)
+
+    @property
+    def _status_host_is_loopback(self) -> bool:
+        host = self.status_host.strip().strip("[]")
+        if host.lower() == "localhost":
+            return True
+        try:
+            return ip_address(host).is_loopback
+        except ValueError:
+            return False

@@ -13,6 +13,11 @@ from .cloud_state import poll_cloud_state
 from .commands import BridgeCommandHandler
 from .config import BridgeConfig, BridgeConfigError, resolve_secret_value
 from .data_api import poll_data_api
+from .observability import (
+    DisabledErrorReporter,
+    ErrorReporter,
+    initialize_error_reporting,
+)
 from .sinks import FfmpegRtspSink
 from .status import BridgeStatusHttpServer, BridgeStatusStore
 from .streamer import run_bridge
@@ -24,6 +29,15 @@ RECONNECT_MAX_DELAY_SECONDS = 60
 def _env_int_default(name: str, default: int) -> str:
     """Return a string default so argparse validates environment values."""
     return os.environ.get(name, str(default))
+
+
+def _parse_bool(value: str) -> bool:
+    cleaned = value.strip().lower()
+    if cleaned in {"1", "true", "yes", "on"}:
+        return True
+    if cleaned in {"0", "false", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("expected true or false")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--status-host",
-        default="0.0.0.0",
+        default=os.environ.get("CRADLEWISE_STATUS_HOST", "127.0.0.1"),
         help="Host/interface for the bridge status HTTP server",
     )
     parser.add_argument(
@@ -113,6 +127,33 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("CRADLEWISE_STATUS_TOKEN"),
         help="Bearer token for status, snapshot, and command HTTP routes",
     )
+    parser.set_defaults(
+        status_token_file=os.environ.get("CRADLEWISE_STATUS_TOKEN_FILE")
+    )
+    parser.add_argument(
+        "--stream-url",
+        default=os.environ.get("CRADLEWISE_STREAM_URL"),
+        help="Reader RTSP(S) URL advertised to authenticated API clients",
+    )
+    parser.add_argument(
+        "--metrics-enabled",
+        type=_parse_bool,
+        default=os.environ.get("CRADLEWISE_METRICS_ENABLED", "false"),
+        help="Expose authenticated, label-free Prometheus metrics",
+    )
+    parser.add_argument(
+        "--error-reporting-dsn",
+        default=os.environ.get("CRADLEWISE_ERROR_REPORTING_DSN"),
+        help="Optional consumer-owned Sentry-compatible DSN",
+    )
+    parser.set_defaults(
+        error_reporting_dsn_file=os.environ.get("CRADLEWISE_ERROR_REPORTING_DSN_FILE")
+    )
+    parser.add_argument(
+        "--error-reporting-environment",
+        default=os.environ.get("CRADLEWISE_ERROR_REPORTING_ENVIRONMENT", "production"),
+        help="Environment name attached to explicitly enabled error events",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     return parser
 
@@ -140,6 +181,26 @@ def resolve_data_api_token(args: argparse.Namespace) -> None:
         file_path=args.data_api_token_file,
         direct_name="CRADLEWISE_DATA_API_TOKEN",
         file_name="CRADLEWISE_DATA_API_TOKEN_FILE",
+    )
+
+
+def resolve_status_token(args: argparse.Namespace) -> None:
+    """Resolve the bridge HTTP bearer token."""
+    args.status_token = resolve_secret_value(
+        direct_value=args.status_token,
+        file_path=args.status_token_file,
+        direct_name="CRADLEWISE_STATUS_TOKEN",
+        file_name="CRADLEWISE_STATUS_TOKEN_FILE",
+    )
+
+
+def resolve_error_reporting_dsn(args: argparse.Namespace) -> None:
+    """Resolve the optional consumer-owned error-reporting DSN."""
+    args.error_reporting_dsn = resolve_secret_value(
+        direct_value=args.error_reporting_dsn,
+        file_path=args.error_reporting_dsn_file,
+        direct_name="CRADLEWISE_ERROR_REPORTING_DSN",
+        file_name="CRADLEWISE_ERROR_REPORTING_DSN_FILE",
     )
 
 
@@ -282,6 +343,8 @@ async def async_main(args: argparse.Namespace) -> None:
         media_stale_timeout=args.media_stale_timeout,
         initial_frame_timeout=args.initial_frame_timeout,
         status_token=args.status_token,
+        advertised_stream_url=args.stream_url,
+        metrics_enabled=args.metrics_enabled,
     )
     store = BridgeStatusStore(
         cradle_id=config.cradle_id,
@@ -296,6 +359,11 @@ async def async_main(args: argparse.Namespace) -> None:
         port=config.status_port,
         command_handler=command_handler.handle_request,
         bearer_token=config.status_token,
+        advertised_stream_url=config.advertised_stream_url,
+        audio_enabled=config.enable_audio,
+        cloud_state_enabled=config.cloud_state_enabled,
+        data_api_enabled=config.data_api_enabled,
+        metrics_enabled=config.metrics_enabled,
     )
     status_server.start()
     logging.info(
@@ -330,6 +398,8 @@ def main() -> None:
     try:
         resolve_cloud_credentials(args)
         resolve_data_api_token(args)
+        resolve_status_token(args)
+        resolve_error_reporting_dsn(args)
     except BridgeConfigError as exc:
         parser.error(str(exc))
     logging.basicConfig(
@@ -337,6 +407,14 @@ def main() -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+    reporter: ErrorReporter = DisabledErrorReporter()
+    try:
+        reporter = initialize_error_reporting(
+            args.error_reporting_dsn,
+            args.error_reporting_environment,
+        )
+    except RuntimeError as exc:
+        parser.error(str(exc))
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -356,10 +434,13 @@ def main() -> None:
         logging.info("Bridge stopped by signal")
     except KeyboardInterrupt:
         logging.info("Bridge interrupted")
-    except Exception:
+    except Exception as exc:
+        reporter.capture_exception(exc)
+        reporter.flush()
         logging.exception("Fatal bridge error; exiting process for supervisor restart")
         os._exit(1)
     finally:
+        reporter.flush()
         loop.close()
 
 

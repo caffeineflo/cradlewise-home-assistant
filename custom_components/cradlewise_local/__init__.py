@@ -62,19 +62,19 @@ async def async_unload_entry(
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Apply the version 2 entity policy without relying on mutable entity IDs."""
-    if entry.version > 2:
+    """Migrate config data while preserving cradle and entity identities."""
+    if entry.version > 3:
         _LOGGER.error(
             "Cannot migrate Cradlewise config entry version %s",
             entry.version,
         )
         return False
 
-    if entry.version == 2 and entry.minor_version >= 1:
+    if entry.version == 3:
         return True
 
     if entry.version == 2:
-        hass.config_entries.async_update_entry(entry, minor_version=1)
+        hass.config_entries.async_update_entry(entry, version=3, minor_version=0)
         return True
 
     registry = er.async_get(hass)
@@ -99,7 +99,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             disabled += 1
 
-    hass.config_entries.async_update_entry(entry, version=2, minor_version=1)
+    hass.config_entries.async_update_entry(entry, version=3, minor_version=0)
     _LOGGER.info(
         "Migrated Cradlewise entity registry: removed %d and disabled %d entities",
         removed,

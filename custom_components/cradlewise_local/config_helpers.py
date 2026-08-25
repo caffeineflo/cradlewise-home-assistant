@@ -7,6 +7,13 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 STATE_ENDPOINT = "state"
 COMMAND_ENDPOINT = "command"
 SNAPSHOT_ENDPOINT = "snapshot.jpg"
+INFO_ENDPOINT = "info"
+KNOWN_ENDPOINTS = {
+    STATE_ENDPOINT,
+    COMMAND_ENDPOINT,
+    SNAPSHOT_ENDPOINT,
+    INFO_ENDPOINT,
+}
 
 
 def _parsed_url(value: str, schemes: set[str]) -> SplitResult | None:
@@ -27,7 +34,7 @@ def _replace_endpoint(value: str, endpoint: str) -> str:
     """Append or replace a known bridge endpoint without corrupting the URL."""
     parsed = urlsplit(value)
     parts = [part for part in parsed.path.split("/") if part]
-    if parts and parts[-1] in {STATE_ENDPOINT, COMMAND_ENDPOINT, SNAPSHOT_ENDPOINT}:
+    if parts and parts[-1] in KNOWN_ENDPOINTS:
         parts[-1] = endpoint
     else:
         parts.append(endpoint)
@@ -60,11 +67,16 @@ def command_url_from_status_url(value: str) -> str:
     return _replace_endpoint(value, COMMAND_ENDPOINT)
 
 
+def info_url_from_status_url(value: str) -> str:
+    """Return the bridge information URL for a base or endpoint URL."""
+    return _replace_endpoint(value, INFO_ENDPOINT)
+
+
 def bridge_base_url(value: str) -> str:
     """Return a configuration URL without a bridge endpoint or credentials."""
     parsed = urlsplit(value)
     parts = [part for part in parsed.path.split("/") if part]
-    if parts and parts[-1] in {STATE_ENDPOINT, COMMAND_ENDPOINT, SNAPSHOT_ENDPOINT}:
+    if parts and parts[-1] in KNOWN_ENDPOINTS:
         parts.pop()
     path = "/" + "/".join(parts) if parts else ""
     host = parsed.hostname or ""

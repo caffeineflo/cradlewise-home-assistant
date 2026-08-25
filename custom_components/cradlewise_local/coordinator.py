@@ -19,6 +19,7 @@ from .const import (
     CONF_CRADLE_ID,
     DEVICE_STATE_MAX_AGE_SECONDS,
     DOMAIN,
+    SUPPORTED_BRIDGE_API_VERSION,
 )
 from .status_helpers import (
     build_command_url,
@@ -40,6 +41,10 @@ class BridgeAuthenticationError(BridgeApiError):
 
 class BridgeIdentityError(BridgeApiError):
     """Raised when the endpoint belongs to another cradle."""
+
+
+class BridgeVersionError(BridgeApiError):
+    """Raised when the bridge API version is not supported."""
 
 
 def request_headers(bearer_token: str | None) -> dict[str, str] | None:
@@ -81,6 +86,44 @@ async def async_fetch_bridge_state(
         raise BridgeIdentityError(
             "Bridge cradle ID does not match the configured cradle"
         )
+    return data
+
+
+async def async_fetch_bridge_info(
+    session: aiohttp.ClientSession,
+    info_url: str,
+    bearer_token: str | None,
+) -> dict[str, Any]:
+    """Fetch and validate the bridge's consumer-facing API contract."""
+    async with session.get(
+        info_url,
+        headers=request_headers(bearer_token),
+        timeout=aiohttp.ClientTimeout(total=10),
+    ) as response:
+        if response.status in {401, 403}:
+            await response.read()
+            raise BridgeAuthenticationError("Bridge authentication failed")
+        if response.status != 200:
+            await response.read()
+            raise BridgeApiError(f"Bridge returned HTTP {response.status}")
+        try:
+            data = await response.json(content_type=None)
+        except (ValueError, aiohttp.ContentTypeError) as exc:
+            raise BridgeApiError("Bridge returned invalid JSON") from exc
+
+    if not isinstance(data, dict):
+        raise BridgeApiError("Bridge returned non-object JSON")
+    api_version = data.get("api_version")
+    if api_version != SUPPORTED_BRIDGE_API_VERSION:
+        raise BridgeVersionError(f"Bridge API version {api_version!r} is not supported")
+    device = data.get("device")
+    if not isinstance(device, dict) or not isinstance(device.get("id"), str):
+        raise BridgeApiError("Bridge response is missing device.id")
+    stream = data.get("stream")
+    if not isinstance(stream, dict) or not isinstance(stream.get("url"), str):
+        raise BridgeApiError("Bridge response is missing stream.url")
+    if not device["id"].strip() or not stream["url"].strip():
+        raise BridgeApiError("Bridge response contains blank device or stream data")
     return data
 
 

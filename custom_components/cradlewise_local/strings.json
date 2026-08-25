@@ -11,44 +11,31 @@
       "invalid_auth": "The bridge rejected the bearer token",
       "invalid_bridge_response": "The bridge returned an invalid status response",
       "invalid_bridge_status_url": "Use an http:// or https:// bridge status URL",
-      "invalid_cradle_id": "Enter a cradle ID",
-      "invalid_snapshot_url": "Use an http:// or https:// snapshot URL",
-      "invalid_stream_url": "Use an rtsp:// or rtsps:// stream URL",
-      "wrong_cradle": "The bridge status belongs to a different cradle ID"
+      "unsupported_bridge": "Update the Cradlewise bridge before adding this integration"
     },
     "step": {
       "user": {
         "title": "Add Cradlewise local bridge",
-        "description": "Configure the local stream and optional bridge status API.",
+        "description": "Connect to the local bridge. Device identity and media endpoints are discovered automatically.",
         "data": {
-          "name": "Name",
-          "cradle_id": "Cradle ID",
-          "stream_url": "RTSP stream URL",
-          "snapshot_url": "Snapshot URL",
-          "bridge_status_url": "Bridge status URL",
+          "bridge_status_url": "Bridge URL",
           "bearer_token": "Bearer token"
         },
         "data_description": {
-          "snapshot_url": "Leave blank to derive it from the bridge status URL.",
-          "bridge_status_url": "Enables device state, controls, and diagnostics.",
-          "bearer_token": "Optional token used for status, commands, and snapshots."
+          "bridge_status_url": "The authenticated HTTP or HTTPS address of the Cradlewise bridge.",
+          "bearer_token": "The bridge token used for setup, state, commands, snapshots, and diagnostics."
         }
       },
       "reconfigure": {
         "title": "Reconfigure Cradlewise local bridge",
-        "description": "Update the local stream and bridge API settings.",
+        "description": "Update the bridge address or token without changing device or entity identity.",
         "data": {
-          "name": "Name",
-          "cradle_id": "Cradle ID",
-          "stream_url": "RTSP stream URL",
-          "snapshot_url": "Snapshot URL",
-          "bridge_status_url": "Bridge status URL",
+          "bridge_status_url": "Bridge URL",
           "bearer_token": "Bearer token"
         },
         "data_description": {
-          "snapshot_url": "Leave blank to derive it from the bridge status URL.",
-          "bridge_status_url": "Enables device state, controls, and diagnostics.",
-          "bearer_token": "Leave blank to keep the stored token. The token is used for status, commands, and snapshots."
+          "bridge_status_url": "The authenticated HTTP or HTTPS address of the Cradlewise bridge.",
+          "bearer_token": "Leave blank to keep the stored token."
         }
       }
     }

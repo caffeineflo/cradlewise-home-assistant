@@ -55,6 +55,10 @@ Official Cradlewise Data API (optional)
   -> cradlewise-local bridge analytics client
   -> bridge status API
   -> Home Assistant sleep sensors
+
+Consumer observability (optional)
+  -> authenticated Prometheus-compatible pull endpoint
+  -> consumer-owned Sentry-compatible error destination
 ```
 
 The bridge gets normal device state directly from the crib's local MQTT
@@ -83,17 +87,13 @@ Until this has a tagged HACS release, install it as a custom repository:
 4. Restart Home Assistant.
 5. Add `Cradlewise` from Settings -> Devices & services.
 
-The integration asks for:
+The integration asks only for the bridge URL and bearer token. It reads the
+authenticated, versioned `/info` contract and derives the cradle ID, stream,
+snapshot, state, and command endpoints. Reconfiguring the bridge address or
+token preserves the existing cradle-based config-entry identity, entity unique
+IDs, and HomeKit accessory identity.
 
-- Cradle ID
-- Authenticated RTSP stream URL, for example
-  `rtsps://cradlewise-reader:<password>@cradlewise-rtsp.example.com:443/cradlewise`
-- Optional bridge status URL, for example
-  `https://cradlewise-api.example.com/state`
-- Optional snapshot URL if you expose snapshots separately
-- Bridge bearer token matching `CRADLEWISE_STATUS_TOKEN`
-
-With the bridge status URL configured, the default entity set contains the
+With the bridge configured, the default entity set contains the
 camera and the high-value baby, sleep, safety, soothing, and environment state
 and controls. Configuration and diagnostic entities are present in the entity
 registry but disabled by default. An upgrade from config entry version 1
@@ -185,7 +185,8 @@ The example exposes:
 
 - RTSP: `rtsp://<reader>:<password>@<host>:8560/cradlewise`
 - Authenticated bridge state: `http://<host>:8088/state`
-- Bridge health: `http://<host>:8088/health`
+- Authenticated bridge discovery: `http://<host>:8088/info`
+- Authenticated bridge health for remote monitors: `http://<host>:8088/health`
 
 These direct plaintext ports are for development or a trusted LAN. The verified
 site-specific production configuration lives with the host's existing Traefik
@@ -203,20 +204,35 @@ place. Do not delete and recreate either integration/device; keeping the same
 HA entry, Scrypted device, and HomeKit accessory preserves downstream identity
 and client metadata.
 
-`/health` is intentionally unauthenticated for container health checks. With
-`CRADLEWISE_STATUS_TOKEN` configured, the state, snapshot, and command
-endpoints require that bearer token; commands are disabled when no token is
-configured. MediaMTX allows only the publisher credential to publish and only
-the reader credential to consume the `cradlewise` path. The example containers
-run without added Linux capabilities, with `no-new-privileges`, read-only root
-filesystems, bounded resources, and rotated container logs. MediaMTX is pinned
-by both version and digest.
+The status server binds to loopback by default. The Compose example explicitly
+binds it inside the container and requires `CRADLEWISE_STATUS_TOKEN`. Loopback
+container health checks can call `/health` without a token; remote health,
+info, state, metrics, snapshot, and command requests require the bearer token.
+Commands are disabled when no token is configured. MediaMTX allows only the
+publisher credential to publish and only the reader credential to consume the
+`cradlewise` path. The example containers run without added Linux capabilities,
+with `no-new-privileges`, read-only root filesystems, bounded resources, and
+rotated container logs. MediaMTX is pinned by both version and digest.
 
 The bridge returns HTTP 503 from `/health` when MQTT, WebRTC/video freshness,
 or the active RTSP sink is unhealthy. It also rejects stale snapshots and marks
 stale local/cloud state unavailable. A successful command response means the
 APK-shaped desired-shadow update was queued for MQTT publication; the next
 reported shadow update is the confirmation of the resulting device state.
+
+### Optional observability
+
+Observability is local and opt-in. `CRADLEWISE_METRICS_ENABLED=true` exposes an
+authenticated, label-free `/metrics` endpoint for any Prometheus-compatible
+scraper. Metrics are never pushed and contain no cradle ID, IP address, baby
+state, account data, or credentials. `CRADLEWISE_ERROR_REPORTING_DSN` or its
+file-backed equivalent enables fatal-exception reporting to a destination the
+consumer owns, including Bugsink, GlitchTip, or Sentry. Without a DSN the SDK
+is not initialized and sends nothing. The project does not bundle a metrics
+database, dashboard, hosted telemetry account, or maintainer-controlled DSN.
+
+See [Private Observability](docs/process/observability.md) for configuration,
+privacy guarantees, and monitor examples.
 
 ## Published Bridge Image
 
@@ -252,7 +268,8 @@ Run the bridge without Docker:
 uv run cradlewise-local \
   --cradle-id 00000000-0000-4000-8000-000000000000 \
   --ip 192.0.2.10 \
-  --output-url rtsp://127.0.0.1:8560/cradlewise
+  --output-url rtsp://127.0.0.1:8560/cradlewise \
+  --stream-url rtsp://reader:password@127.0.0.1:8560/cradlewise
 ```
 
 Build a local development image when changing bridge code:
@@ -266,6 +283,7 @@ docker build -t cradlewise-local-bridge:dev .
 The repo includes protocol notes and reverse-engineering references under `docs/`. The most useful starting points are:
 
 - [Home Assistant Local Bridge](docs/process/home-assistant-local-bridge.md)
+- [Private Observability](docs/process/observability.md)
 - [Wake Event Recording](docs/process/wake-event-recording.md)
 - [Authentication & Certificates](docs/process/authentication.md)
 - [Local Video Streaming](docs/api/local-streaming.md)

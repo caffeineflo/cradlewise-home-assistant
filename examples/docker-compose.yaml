@@ -44,8 +44,11 @@ services:
     env_file:
       - ../.env
     environment:
+      CRADLEWISE_STATUS_HOST: 0.0.0.0
       CRADLEWISE_OUTPUT_URL: >-
         rtsp://${CRADLEWISE_RTSP_PUBLISH_USER}:${CRADLEWISE_RTSP_PUBLISH_PASSWORD}@cradlewise-mediamtx:8554/cradlewise
+      CRADLEWISE_STREAM_URL: >-
+        rtsp://${CRADLEWISE_RTSP_READ_USER}:${CRADLEWISE_RTSP_READ_PASSWORD}@${CRADLEWISE_BIND_ADDRESS}:8560/cradlewise
     depends_on:
       cradlewise-mediamtx:
         condition: service_started

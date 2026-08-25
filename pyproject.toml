@@ -26,6 +26,9 @@ ha-test = [
   "ha-ffmpeg==3.2.2; python_full_version >= '3.14.2'",
   "pytest-homeassistant-custom-component==0.13.346; python_full_version >= '3.14.2'",
 ]
+observability = [
+  "sentry-sdk>=2.68.0,<3.0.0",
+]
 
 [project.scripts]
 cradlewise-local = "cradlewise_local.__main__:main"

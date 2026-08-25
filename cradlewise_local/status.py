@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hmac
+import ipaddress
 import json
 import logging
 import threading
@@ -15,6 +16,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .commands import CommandError, CommandUnavailable
+from .observability import (
+    BRIDGE_API_VERSION,
+    BRIDGE_VERSION,
+    render_prometheus_metrics,
+)
 
 log = logging.getLogger(__name__)
 
@@ -1494,6 +1500,11 @@ class BridgeStatusStore:
                 and peer_healthy
             )
             device_snapshot = _device_state_snapshot(device_state)
+            device_age = (
+                max(0.0, now - device_updated_at)
+                if device_updated_at is not None
+                else None
+            )
             device_available = bool(device_state) and any(
                 not metadata["stale"] for metadata in source_meta.values()
             )
@@ -1578,6 +1589,7 @@ class BridgeStatusStore:
                 "device_state": {
                     **device_snapshot,
                     "updated_at": device_updated_at,
+                    "age_seconds": device_age,
                     "source": device_source,
                     "available": device_available,
                     "stale": bool(device_state) and not device_available,
@@ -1611,6 +1623,11 @@ class BridgeStatusHttpServer:
         command_handler: CommandHandler | None = None,
         bearer_token: str | None = None,
         snapshot_max_age_seconds: float = 15,
+        advertised_stream_url: str | None = None,
+        audio_enabled: bool = True,
+        cloud_state_enabled: bool = False,
+        data_api_enabled: bool = False,
+        metrics_enabled: bool = False,
     ) -> None:
         self.store = store
         self.host = host
@@ -1618,6 +1635,11 @@ class BridgeStatusHttpServer:
         self.command_handler = command_handler
         self.bearer_token = bearer_token
         self.snapshot_max_age_seconds = snapshot_max_age_seconds
+        self.advertised_stream_url = advertised_stream_url
+        self.audio_enabled = audio_enabled
+        self.cloud_state_enabled = cloud_state_enabled
+        self.data_api_enabled = data_api_enabled
+        self.metrics_enabled = metrics_enabled
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -1628,6 +1650,27 @@ class BridgeStatusHttpServer:
         command_handler = self.command_handler
         bearer_token = self.bearer_token
         snapshot_max_age_seconds = self.snapshot_max_age_seconds
+        metrics_enabled = self.metrics_enabled
+        info = {
+            "api_version": BRIDGE_API_VERSION,
+            "bridge_version": BRIDGE_VERSION,
+            "device": {"id": store.cradle_id},
+            "capabilities": {
+                "camera": self.advertised_stream_url is not None,
+                "audio": self.audio_enabled,
+                "controls": command_handler is not None and bearer_token is not None,
+                "cloud_state": self.cloud_state_enabled,
+                "sleep_analytics": self.data_api_enabled,
+                "metrics": metrics_enabled,
+            },
+            "endpoints": {
+                "state": "/state",
+                "snapshot": "/snapshot.jpg",
+                "command": "/command",
+                "metrics": "/metrics" if metrics_enabled else None,
+            },
+            "stream": {"url": self.advertised_stream_url},
+        }
 
         class Handler(BaseHTTPRequestHandler):
             def setup(self) -> None:
@@ -1652,32 +1695,67 @@ class BridgeStatusHttpServer:
                 self.end_headers()
                 return False
 
+            def _client_is_loopback(self) -> bool:
+                try:
+                    return ipaddress.ip_address(self.client_address[0]).is_loopback
+                except ValueError:
+                    return False
+
+            def _send_bytes(
+                self,
+                status: HTTPStatus,
+                body: bytes,
+                content_type: str,
+            ) -> None:
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_GET(self) -> None:
                 if self.path == "/health":
+                    if (
+                        bearer_token is not None
+                        and not self._client_is_loopback()
+                        and not self._require_authorization()
+                    ):
+                        return
                     healthy = store.snapshot()["bridge"]["healthy"]
                     body = json.dumps({"healthy": healthy}).encode()
-                    self.send_response(
-                        HTTPStatus.OK if healthy else HTTPStatus.SERVICE_UNAVAILABLE
+                    self._send_bytes(
+                        HTTPStatus.OK if healthy else HTTPStatus.SERVICE_UNAVAILABLE,
+                        body,
+                        "application/json",
                     )
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
                     return
 
-                if self.path not in {"/state", "/snapshot.jpg"}:
+                if self.path == "/metrics" and not metrics_enabled:
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                if self.path not in {"/info", "/metrics", "/state", "/snapshot.jpg"}:
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
                 if not self._require_authorization():
                     return
 
+                if self.path == "/info":
+                    self._send_bytes(
+                        HTTPStatus.OK,
+                        json.dumps(info, sort_keys=True).encode(),
+                        "application/json",
+                    )
+                    return
+                if self.path == "/metrics":
+                    self._send_bytes(
+                        HTTPStatus.OK,
+                        render_prometheus_metrics(store.snapshot()),
+                        "text/plain; version=0.0.4; charset=utf-8",
+                    )
+                    return
                 if self.path == "/state":
                     body = store.to_json_bytes()
-                    self.send_response(HTTPStatus.OK)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                    self._send_bytes(HTTPStatus.OK, body, "application/json")
                     return
                 else:
                     if store.snapshot_is_stale(snapshot_max_age_seconds):

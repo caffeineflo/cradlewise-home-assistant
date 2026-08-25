@@ -17,6 +17,9 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Authenticated RTSP publishing and reading through MediaMTX.
 - Home Assistant config flow, diagnostics, controls, camera, and wake recorder.
 - Reproducible bridge container builds and GHCR publishing in CI.
+- A versioned, authenticated bridge `/info` contract for compact HA setup.
+- Opt-in authenticated Prometheus metrics with no identifying labels.
+- Opt-in Sentry-compatible fatal error reporting with privacy redaction.
 
 ### Changed
 
@@ -30,3 +33,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   advanced configuration and diagnostics disabled by default.
 - Preserved `cradlewise_local` entity and device identity while using the plain
   `Cradlewise` display name required by Home Assistant naming guidance.
+- Reduced Home Assistant setup to a bridge URL and bearer token while
+  preserving existing config-entry, entity, camera, and HomeKit identities.
+- Bound the bridge HTTP server to loopback by default and required a bearer
+  token for non-loopback deployments.

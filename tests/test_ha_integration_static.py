@@ -137,6 +137,7 @@ def test_manifest_is_local_polling_config_flow_integration():
     )
     assert manifest["version"] == "0.1.0"
     assert manifest["name"] == "Cradlewise"
+    assert manifest["requirements"] == []
 
 
 def test_package_and_integration_versions_match():
@@ -166,6 +167,7 @@ def test_public_repo_scaffolding_exists():
     assert Path("CHANGELOG.md").exists()
     assert Path("CONTRIBUTING.md").exists()
     assert Path("SECURITY.md").exists()
+    assert Path("docs/process/observability.md").exists()
 
 
 def test_url_helpers_validate_hosts_schemes_and_ports():
@@ -195,6 +197,10 @@ def test_url_helpers_replace_only_the_endpoint_path_segment():
     assert (
         helpers.command_url_from_status_url("http://bridge:8088/api/state")
         == "http://bridge:8088/api/command"
+    )
+    assert (
+        helpers.info_url_from_status_url("http://bridge:8088/api/state")
+        == "http://bridge:8088/api/info"
     )
     assert (
         helpers.bridge_base_url(
@@ -345,11 +351,11 @@ def test_config_flow_supports_validated_reconfigure_and_bearer_auth():
     camera_source = (INTEGRATION_PATH / "camera.py").read_text()
     diagnostics_source = (INTEGRATION_PATH / "diagnostics.py").read_text()
 
-    assert "VERSION = 2" in source
-    assert "MINOR_VERSION = 1" in source
+    assert "VERSION = 3" in source
+    assert "MINOR_VERSION = 0" in source
     assert "async_step_reconfigure" in source
     assert "async_update_reload_and_abort" in source
-    assert "async_fetch_bridge_state" in source
+    assert "async_fetch_bridge_info" in source
     assert "CONF_BEARER_TOKEN" in source
     assert "stored_bearer_token" in source
     assert "if key != CONF_BEARER_TOKEN" in source

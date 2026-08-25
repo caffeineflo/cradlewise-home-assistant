@@ -8,6 +8,8 @@ from cradlewise_local.__main__ import (
     main,
     resolve_cloud_credentials,
     resolve_data_api_token,
+    resolve_error_reporting_dsn,
+    resolve_status_token,
 )
 from cradlewise_local.config import (
     BridgeConfig,
@@ -127,6 +129,51 @@ def test_bridge_config_accepts_initial_frame_timeout_and_status_token(tmp_path):
     assert config.status_token == "secret"
 
 
+def test_bridge_config_accepts_advertised_stream_and_opt_in_metrics(tmp_path):
+    certs_dir = tmp_path / "certs"
+    write_cert_set(certs_dir)
+
+    config = BridgeConfig.from_values(
+        cradle_id="cradle",
+        certs_dir=certs_dir,
+        output_url="rtsp://127.0.0.1:8554/cradlewise",
+        advertised_stream_url="rtsps://reader:secret@stream.test/cradlewise",
+        status_token="secret",
+        metrics_enabled=True,
+    )
+
+    assert (
+        config.advertised_stream_url,
+        config.metrics_enabled,
+    ) == ("rtsps://reader:secret@stream.test/cradlewise", True)
+
+
+def test_bridge_config_requires_authentication_for_metrics(tmp_path):
+    certs_dir = tmp_path / "certs"
+    write_cert_set(certs_dir)
+
+    with pytest.raises(BridgeConfigError, match="metrics require a status token"):
+        BridgeConfig.from_values(
+            cradle_id="cradle",
+            certs_dir=certs_dir,
+            output_url="rtsp://127.0.0.1:8554/cradlewise",
+            metrics_enabled=True,
+        )
+
+
+def test_bridge_config_requires_authentication_on_non_loopback_status_host(tmp_path):
+    certs_dir = tmp_path / "certs"
+    write_cert_set(certs_dir)
+
+    with pytest.raises(BridgeConfigError, match="status_token is required"):
+        BridgeConfig.from_values(
+            cradle_id="cradle",
+            certs_dir=certs_dir,
+            output_url="rtsp://127.0.0.1:8554/cradlewise",
+            status_host="0.0.0.0",
+        )
+
+
 def test_bridge_config_rejects_blank_status_token(tmp_path):
     certs_dir = tmp_path / "certs"
     write_cert_set(certs_dir)
@@ -166,6 +213,14 @@ def test_bridge_cli_reads_output_url_from_environment(monkeypatch):
     args = parser.parse_args(["--cradle-id", "cradle"])
 
     assert args.output_url == "rtsp://publisher:secret@mediamtx:8554/cradlewise"
+
+
+def test_bridge_cli_reads_opt_in_metrics_from_environment(monkeypatch):
+    monkeypatch.setenv("CRADLEWISE_METRICS_ENABLED", "true")
+
+    args = parse_bridge_args()
+
+    assert args.metrics_enabled is True
 
 
 def test_bridge_cli_requires_output_url_without_environment(monkeypatch):
@@ -222,6 +277,28 @@ def test_bridge_cli_reads_data_api_token_from_file(tmp_path, monkeypatch):
     resolve_data_api_token(args)
 
     assert args.data_api_token == "cw_file_secret"
+
+
+def test_bridge_cli_reads_status_and_error_reporting_secrets_from_files(
+    tmp_path, monkeypatch
+):
+    status_file = tmp_path / "status-token"
+    dsn_file = tmp_path / "error-reporting-dsn"
+    status_file.write_text("local-status-secret\n")
+    dsn_file.write_text("https://public@example.invalid/1\n")
+    monkeypatch.setenv("CRADLEWISE_STATUS_TOKEN", "")
+    monkeypatch.setenv("CRADLEWISE_STATUS_TOKEN_FILE", str(status_file))
+    monkeypatch.setenv("CRADLEWISE_ERROR_REPORTING_DSN", "")
+    monkeypatch.setenv("CRADLEWISE_ERROR_REPORTING_DSN_FILE", str(dsn_file))
+    args = parse_bridge_args()
+
+    resolve_status_token(args)
+    resolve_error_reporting_dsn(args)
+
+    assert (args.status_token, args.error_reporting_dsn) == (
+        "local-status-secret",
+        "https://public@example.invalid/1",
+    )
 
 
 def test_bridge_cli_allows_mixed_file_and_direct_cloud_credentials(

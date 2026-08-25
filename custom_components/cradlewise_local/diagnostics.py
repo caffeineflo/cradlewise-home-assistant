@@ -10,7 +10,9 @@ from homeassistant.core import HomeAssistant
 from . import CradlewiseConfigEntry
 from .const import (
     CONF_BEARER_TOKEN,
+    CONF_BRIDGE_API_VERSION,
     CONF_BRIDGE_STATUS_URL,
+    CONF_BRIDGE_VERSION,
     CONF_CRADLE_ID,
     CONF_SNAPSHOT_URL,
     CONF_STREAM_URL,
@@ -42,7 +44,11 @@ async def async_get_config_entry_diagnostics(
             ),
         },
         "bridge": {
+            "api_version": entry.data.get(CONF_BRIDGE_API_VERSION),
+            "version": entry.data.get(CONF_BRIDGE_VERSION),
             "healthy": path_value(data, ("bridge", "healthy")),
+            "uptime_seconds": path_value(data, ("bridge", "uptime_seconds")),
+            "reconnect_attempts": path_value(data, ("bridge", "reconnect_attempts")),
             "mqtt_connected": path_value(data, ("mqtt", "connected")),
             "webrtc_connection_state": path_value(data, ("webrtc", "connection_state")),
             "ice_connection_state": path_value(
@@ -50,6 +56,9 @@ async def async_get_config_entry_diagnostics(
             ),
             "video_track": path_value(data, ("media", "video_track")),
             "audio_track": path_value(data, ("media", "audio_track")),
+            "video_frames": path_value(data, ("media", "video_frames")),
+            "audio_frames": path_value(data, ("media", "audio_frames")),
+            "dropped_video_frames": path_value(data, ("sink", "dropped_video_frames")),
         },
         "device_state": {
             "source": path_value(data, ("device_state", "source")),

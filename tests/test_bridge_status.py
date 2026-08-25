@@ -156,6 +156,7 @@ def test_status_store_marks_source_state_stale(monkeypatch):
     assert device_state["baby_present"] is True
     assert device_state["available"] is False
     assert device_state["stale"] is True
+    assert device_state["age_seconds"] == 2.0
     assert device_state["sources"]["cloud"]["stale"] is True
 
 
@@ -265,6 +266,103 @@ def test_status_http_server_requires_bearer_token_for_state():
         server.close()
 
     assert exc_info.value.code == 401
+
+
+def test_status_http_server_exposes_authenticated_versioned_info():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    server = BridgeStatusHttpServer(
+        store,
+        "127.0.0.1",
+        _free_port(),
+        bearer_token="secret",
+        advertised_stream_url="rtsps://reader:secret@stream.test/cradlewise",
+        cloud_state_enabled=True,
+        metrics_enabled=True,
+    )
+    server.start()
+
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(f"http://127.0.0.1:{server.port}/info", timeout=2)
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.port}/info",
+            headers={"Authorization": "Bearer secret"},
+        )
+        with urllib.request.urlopen(request, timeout=2) as response:
+            payload = json.load(response)
+    finally:
+        server.close()
+
+    assert (
+        exc_info.value.code,
+        payload["api_version"],
+        payload["device"]["id"],
+        payload["stream"]["url"],
+        payload["capabilities"]["cloud_state"],
+        payload["capabilities"]["metrics"],
+    ) == (
+        401,
+        1,
+        "cradle-1",
+        "rtsps://reader:secret@stream.test/cradlewise",
+        True,
+        True,
+    )
+
+
+def test_metrics_are_disabled_unless_explicitly_enabled():
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    server = BridgeStatusHttpServer(
+        store, "127.0.0.1", _free_port(), bearer_token="secret"
+    )
+    server.start()
+
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.port}/metrics",
+            headers={"Authorization": "Bearer secret"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(request, timeout=2)
+    finally:
+        server.close()
+
+    assert exc_info.value.code == 404
+
+
+def test_metrics_require_authentication_and_exclude_private_state():
+    cradle_id = "00000000-0000-4000-8000-000000000001"
+    store = BridgeStatusStore(cradle_id=cradle_id, crib_ip="192.0.2.10")
+    store.update_device_state({"babyPresent": True}, source="cloud")
+    server = BridgeStatusHttpServer(
+        store,
+        "127.0.0.1",
+        _free_port(),
+        bearer_token="secret",
+        metrics_enabled=True,
+    )
+    server.start()
+
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(f"http://127.0.0.1:{server.port}/metrics", timeout=2)
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.port}/metrics",
+            headers={"Authorization": "Bearer secret"},
+        )
+        with urllib.request.urlopen(request, timeout=2) as response:
+            body = response.read().decode()
+    finally:
+        server.close()
+
+    assert (
+        exc_info.value.code,
+        response.headers["Content-Type"],
+        "cradlewise_bridge_healthy" in body,
+        cradle_id not in body,
+        "192.0.2.10" not in body,
+        "baby" not in body,
+    ) == (401, "text/plain; version=0.0.4; charset=utf-8", True, True, True, True)
 
 
 def test_health_is_unauthenticated_and_returns_503_until_healthy():

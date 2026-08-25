@@ -47,6 +47,7 @@ uv run cradlewise-local \
   --cradle-id 00000000-0000-4000-8000-000000000000 \
   --ip cradlewise.iot \
   --output-url rtsp://publisher:password@192.0.2.20:8560/cradlewise \
+  --stream-url rtsp://reader:password@192.0.2.20:8560/cradlewise \
   --status-token replace-with-a-random-token
 ```
 
@@ -125,12 +126,12 @@ MediaMTX image is pinned by version and digest, and its publisher and reader
 accounts have separate permissions for the `cradlewise` path.
 
 The base Compose example publishes plaintext ports `8088` and `8560` and is
-only for development or a trusted LAN. `/health` is unauthenticated so Docker
-can probe it and returns 200 only while MQTT, WebRTC/video freshness, and the
-active RTSP sink are healthy; it returns 503 otherwise. When a bearer token is
-configured, `/state`, `/snapshot.jpg`, and `/command` require it. Stale
-snapshots are rejected, and commands are unavailable when no bearer token is
-configured.
+only for development or a trusted LAN. The HTTP server binds to loopback by
+default; Compose explicitly binds it inside the container and requires a
+bearer token. Docker's loopback `/health` probe does not need the token, while
+remote `/health`, `/info`, `/state`, `/metrics`, `/snapshot.jpg`, and `/command`
+requests require it. Stale snapshots are rejected, and commands are unavailable
+when no bearer token is configured.
 
 The API process remains available during a local crib outage. Local MQTT,
 WebRTC, and RTSP are recreated with bounded backoff while cloud state polling
@@ -167,6 +168,10 @@ https://cradlewise-api.example.com/state
 rtsps://cradlewise-reader:<password>@cradlewise-rtsp.example.com:443/cradlewise
 ```
 
+Set `CRADLEWISE_STREAM_URL` in that production bridge deployment to the RTSPS
+reader URL. `/info` returns it only to authenticated clients so Home Assistant
+can configure its camera without asking the user for a separate media URL.
+
 Reconfigure the existing Home Assistant config entry with those URLs and
 update the existing Scrypted Rebroadcast/Prebuffer source URL in place. Do not
 delete/re-add the HA entry or Scrypted device; retaining them preserves the
@@ -174,14 +179,10 @@ existing entity, Scrypted, and HomeKit accessory identities.
 
 ## Home Assistant Component
 
-Copy `custom_components/cradlewise_local` into HA's `/config/custom_components/`
-directory, restart HA, then add "Cradlewise Local" from Devices & Services.
-
-For the stream URL, use the RTSP reader credential:
-
-```text
-rtsps://cradlewise-reader:<password>@cradlewise-rtsp.example.com:443/cradlewise
-```
+Install the repository through HACS as a custom integration, restart HA, then
+add "Cradlewise" from Devices & Services. Enter only the bridge base URL and
+bearer token. The bridge's authenticated `/info` response supplies the stable
+cradle ID and RTSP(S) reader URL.
 
 If using Home Assistant's YAML `ffmpeg` camera platform directly, force RTSP
 over TCP. The default UDP pull produced intermittent `camera_proxy` 500s during
@@ -195,22 +196,20 @@ smoke testing:
 
 The custom component gives HA a normal camera entity through `stream_source()`
 and reads non-camera state from the bridge `/state` endpoint. Configure the
-same bearer token in the bridge and config entry. `/health` stays
-unauthenticated for health checks; `/state`, `/snapshot.jpg`, and `/command`
-require `Authorization: Bearer <token>` when a token is configured. Commands
-are disabled when no token is configured.
+same bearer token in the bridge and config entry. Remote API requests require
+`Authorization: Bearer <token>`. Commands are disabled when no token is
+configured.
 
-The config flow validates the RTSP and HTTP URL schemes, bearer access, and the
-bridge's cradle ID. Reconfigure an existing entry through Devices & Services
-when changing credentials or URLs; do not edit Home Assistant storage files.
-The camera sends the bearer token to the snapshot endpoint only when it has the
-same origin as the configured bridge status URL.
+The config flow validates the HTTP URL, bearer access, bridge API version,
+discovered cradle ID, and advertised RTSP(S) URL. Reconfigure an existing entry
+through Devices & Services when changing credentials or URLs; do not edit Home
+Assistant storage files. The camera sends the bearer token to the snapshot
+endpoint only when it has the same origin as the configured bridge URL.
 
 ### Entity Surface
 
-With a bridge status URL configured, a fresh install creates 107 entities: 29
-enabled and 78 disabled by default. Without the status endpoint, only the
-camera is created. The default surface is intentionally limited to the
+With a bridge configured, a fresh install creates 113 entities: 35 enabled and
+78 disabled by default. The default surface is intentionally limited to the
 entities that are useful for dashboards and automations:
 
 - 10 binary sensors: baby present, baby needs attention/help, crib helping,
@@ -231,10 +230,12 @@ and less common crib controls. Enable one deliberately from the entity
 registry when it serves a real dashboard or automation. The read-only firmware
 update entity reports installed/offered versions but cannot install firmware.
 
-The version 2.1 config-entry migration removes any matching entries from a set
+The version 2.1 config-entry migration removed matching entries from a set
 of 112 obsolete duplicate or wrong-domain entity keys and disables the 78
 advanced entities. It keys the migration by integration unique ID, not by a
 user-editable entity ID, so retained entity identities remain stable.
+Version 3 simplifies onboarding by discovering bridge details without changing
+those retained identities.
 
 ### Control Contract
 
