@@ -1,9 +1,8 @@
 from pathlib import Path
 
-from test_local_client import FakeMqttClient
-
 from cradlewise_client.local import LocalCredentials
 from cradlewise_client.remote import REMOTE_MQTT_ENDPOINT, RemoteCradleClient
+from test_local_client import FakeMqttClient
 
 
 def _credentials(tmp_path: Path) -> LocalCredentials:
