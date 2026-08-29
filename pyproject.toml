@@ -6,12 +6,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "aiortc==1.14.0",
-  "boto3",
-  "cryptography",
+  "cradlewise-client==0.1.0",
   "numpy",
-  "paho-mqtt>=2.0.0",
-  "pycognito",
-  "requests",
 ]
 
 [project.optional-dependencies]
@@ -53,9 +49,16 @@ packages = ["cradlewise_local"]
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+markers = ["enable_socket: allow loopback sockets for bridge HTTP server tests"]
 
 [tool.ruff]
 target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.uv.sources]
+cradlewise-client = {workspace = true}
+
+[tool.uv.workspace]
+members = ["packages/cradlewise-client"]

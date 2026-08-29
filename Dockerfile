@@ -15,6 +15,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
+COPY packages/cradlewise-client ./packages/cradlewise-client
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --extra observability --no-install-project
 

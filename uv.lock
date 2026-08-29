@@ -7,6 +7,12 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
+[manifest]
+members = [
+    "cradlewise-client",
+    "cradlewise-local",
+]
+
 [[package]]
 name = "acme"
 version = "5.4.0"
@@ -1123,19 +1129,36 @@ wheels = [
 ]
 
 [[package]]
+name = "cradlewise-client"
+version = "0.1.0"
+source = { editable = "packages/cradlewise-client" }
+dependencies = [
+    { name = "boto3" },
+    { name = "cryptography" },
+    { name = "paho-mqtt" },
+    { name = "pycognito" },
+    { name = "requests" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", specifier = ">=1.34.0,<2.0.0" },
+    { name = "cryptography", specifier = ">=42.0.0,<49.0.0" },
+    { name = "paho-mqtt", specifier = ">=2.0.0,<3.0.0" },
+    { name = "pycognito", specifier = ">=2024.5.1,<2025.0.0" },
+    { name = "requests", specifier = ">=2.31.0,<3.0.0" },
+]
+
+[[package]]
 name = "cradlewise-local"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiortc" },
-    { name = "boto3" },
-    { name = "cryptography" },
+    { name = "cradlewise-client" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14.2'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and python_full_version < '3.14.2'" },
-    { name = "paho-mqtt" },
-    { name = "pycognito" },
-    { name = "requests" },
 ]
 
 [package.optional-dependencies]
@@ -1157,17 +1180,13 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "aiortc", specifier = "==1.14.0" },
-    { name = "boto3" },
-    { name = "cryptography" },
+    { name = "cradlewise-client", editable = "packages/cradlewise-client" },
     { name = "ha-ffmpeg", marker = "python_full_version >= '3.14.2' and extra == 'ha-test'", specifier = "==3.2.2" },
     { name = "numpy" },
-    { name = "paho-mqtt", specifier = ">=2.0.0" },
-    { name = "pycognito" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = "==1.4.0" },
     { name = "pytest-homeassistant-custom-component", marker = "python_full_version >= '3.14.2' and extra == 'ha-test'", specifier = "==0.13.346" },
     { name = "pyturbojpeg", marker = "python_full_version >= '3.14.2' and extra == 'ha-test'", specifier = "==1.8.3" },
-    { name = "requests" },
     { name = "ruff", marker = "extra == 'test'", specifier = "==0.15.21" },
     { name = "sentry-sdk", marker = "extra == 'observability'", specifier = ">=2.68.0,<3.0.0" },
     { name = "yamllint", marker = "extra == 'test'", specifier = "==1.38.0" },
