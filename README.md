@@ -77,11 +77,11 @@ read device state from it or send commands through it in Cloud only mode. It
 polls only the companion's authenticated semantic health endpoint to report
 camera availability accurately.
 
-Automatic mode rediscoveries also revalidate and replace a rotated local
-broker CA. In Local only mode, run the integration's Reconfigure action after
-a crib firmware update if the local connection stops working; submitting the
-existing address revalidates and repins that broker without storing account
-credentials.
+Automatic mode accepts a rediscovered local address only when the broker still
+presents the pinned core CA. It never replaces a different CA unattended. If a
+firmware update rotates that CA, use the integration's Reconfigure action to
+revalidate and explicitly trust the broker's current CA. Local-only
+reconfiguration does not store account credentials.
 
 ## Architecture
 
