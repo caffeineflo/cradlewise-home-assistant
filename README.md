@@ -11,6 +11,32 @@ Cradlewise.
 The current protocol surface is validated against Android app 2.55.5
 (version code 204) and live crib firmware 0.2.73.
 
+## Purpose and scope
+
+This is an unofficial, independently developed interoperability project for
+people who lawfully own or are authorized to use a Cradlewise crib. It connects
+the crib's existing state, controls, and media interfaces to Home Assistant so
+owners can use the basic functions of their hardware on their own network.
+
+The project does not unlock subscription-gated features, bypass paid API
+entitlements, access another user's crib or account, modify Cradlewise firmware,
+disable manufacturer safety limits, or defeat device authentication. Users must
+supply their own Cradlewise account and hardware.
+
+Local-only mode uses the user's authenticated account once during setup to
+identify the crib and provision its device certificate. It then discards the
+email and password and performs no ongoing cloud polling. Cloud access after
+setup is optional and uses only the user's authenticated account.
+
+This repository contains independently written compatibility code. It does not
+distribute Cradlewise application or firmware code, extracted APK contents,
+user passwords, temporary cloud credentials, provisioned private keys, nursery
+recordings, or other user data.
+
+Contributions that add subscription or paywall circumvention, cross-account
+access, firmware modification, safety-limit bypasses, or copied Cradlewise
+application or firmware code are out of scope.
+
 ## Status
 
 This is pre-release software being hardened against a live crib before its
@@ -315,6 +341,10 @@ The repo includes protocol notes and reverse-engineering references under `docs/
 These notes are kept because they explain the compatibility decisions in the bridge, especially local MQTT/WebRTC signaling and the optional cloud state shape.
 
 ## Safety Notes
+
+This integration is not a medical device or a substitute for adult supervision,
+the crib's built-in safety features, or the official Cradlewise app. Crib
+firmware and physical safety controls remain authoritative.
 
 Don't commit `certs/`, `.env`, APKs, or decompiled app output. The repository ignore rules already exclude those paths.
 
