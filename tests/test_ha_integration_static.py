@@ -116,6 +116,14 @@ def test_english_translation_matches_source_strings() -> None:
     assert translation == strings
 
 
+def test_invalid_cradle_error_has_an_english_translation() -> None:
+    strings = json.loads(
+        (INTEGRATION_PATH / "strings.json").read_text(encoding="utf-8")
+    )
+
+    assert "invalid_cradle" in strings["config"]["error"]
+
+
 def test_brand_asset_is_present() -> None:
     assert (INTEGRATION_PATH / "brand/icon.png").is_file()
 

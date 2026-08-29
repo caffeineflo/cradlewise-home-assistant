@@ -597,6 +597,14 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current_ca = self._config.get(CONF_SERVER_CA_CERTIFICATE)
         if host == current_host and server_ca == current_ca:
             return
+        if current_ca and server_ca != current_ca:
+            message = (
+                "Local MQTT broker CA changed; use Reconfigure to trust the new "
+                "broker certificate"
+            )
+            self._state.mark_error("local", message)
+            _LOGGER.warning(message)
+            return
 
         updated_data = {
             **self._entry.data,

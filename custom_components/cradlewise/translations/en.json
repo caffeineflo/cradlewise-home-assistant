@@ -13,6 +13,7 @@
     "error": {
       "cannot_connect": "Could not connect to Cradlewise",
       "invalid_auth": "Cradlewise rejected the account credentials",
+      "invalid_cradle": "Select a paired Cradlewise crib",
       "invalid_connection_mode": "Select a supported connection mode",
       "no_cradles": "No paired Cradlewise crib was found",
       "wrong_cradle": "This account does not contain the configured crib",
@@ -33,7 +34,7 @@
       "select_cradle": {"title": "Choose a crib", "data": {"cradle_id": "Crib"}},
       "reconfigure": {
         "title": "Reconfigure Cradlewise",
-        "description": "Change connection mode or local address without replacing the crib or its entities. Leave the password blank to keep it. Automatic can discover a blank local address; Local only revalidates the entered broker.",
+        "description": "Change connection mode or local address without replacing the crib or its entities. Leave the password blank to keep it. Automatic can discover a blank local address. Any mode with local access revalidates the broker and trusts its current core CA.",
         "data": {
           "connection_mode": "Connection mode",
           "email": "Email",

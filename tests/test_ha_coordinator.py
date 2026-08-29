@@ -23,6 +23,8 @@ from custom_components.cradlewise.const import (
     CONF_BRIDGE_STATUS_URL,
     CONF_CONNECTION_MODE,
     CONF_CRADLE_ID,
+    CONF_LOCAL_HOST,
+    CONF_SERVER_CA_CERTIFICATE,
     CONNECTION_MODE_AUTOMATIC,
     CONNECTION_MODE_CLOUD,
     DOMAIN,
@@ -207,6 +209,67 @@ async def test_stopped_mqtt_provider_is_retried_with_backoff(
     await coordinator._async_retry_stopped_clients()
 
     assert cloud.async_start.await_count == 1
+
+
+async def test_local_rediscovery_accepts_a_new_address_with_the_pinned_ca(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = _entry(
+        **{
+            CONF_LOCAL_HOST: "192.0.2.10",
+            CONF_SERVER_CA_CERTIFICATE: "pinned CA",
+        }
+    )
+    entry.add_to_hass(hass)
+    coordinator = CradlewiseCoordinator(hass, entry)
+    coordinator._cloud_account = SimpleNamespace(
+        get_cradle_ip=lambda cradle_id: "192.0.2.11"
+    )
+    coordinator._credentials = SimpleNamespace(
+        client_cert_path="client.pem",
+        client_key_path="client.key",
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.coordinator.pin_server_ca",
+        lambda host, client_certificate_path, client_private_key_path: "pinned CA",
+    )
+
+    await coordinator._async_refresh_local_endpoint()
+
+    assert entry.data[CONF_LOCAL_HOST] == "192.0.2.11"
+
+
+async def test_local_rediscovery_rejects_a_changed_broker_ca(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = _entry(
+        **{
+            CONF_LOCAL_HOST: "192.0.2.10",
+            CONF_SERVER_CA_CERTIFICATE: "pinned CA",
+        }
+    )
+    entry.add_to_hass(hass)
+    coordinator = CradlewiseCoordinator(hass, entry)
+    coordinator._cloud_account = SimpleNamespace(
+        get_cradle_ip=lambda cradle_id: "192.0.2.11"
+    )
+    coordinator._credentials = SimpleNamespace(
+        client_cert_path="client.pem",
+        client_key_path="client.key",
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.coordinator.pin_server_ca",
+        lambda host, client_certificate_path, client_private_key_path: "different CA",
+    )
+
+    await coordinator._async_refresh_local_endpoint()
+
+    assert (
+        entry.data[CONF_LOCAL_HOST],
+        entry.data[CONF_SERVER_CA_CERTIFICATE],
+    ) == ("192.0.2.10", "pinned CA")
 
 
 async def test_command_availability_accepts_any_single_healthy_provider(

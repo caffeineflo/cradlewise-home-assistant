@@ -278,6 +278,28 @@ async def test_automatic_setup_continues_when_the_local_broker_is_offline(
     assert CONF_SERVER_CA_CERTIFICATE not in result["data"]
 
 
+async def test_automatic_setup_reports_cloud_provisioning_io_failure(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_cloud_setup(monkeypatch)
+
+    def fail_provisioning(self: object, account: CradleAccount, **kwargs: Any) -> None:
+        raise OSError("certificate service unavailable")
+
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.provision_credentials",
+        fail_provisioning,
+    )
+
+    result = await _start_account_flow(hass, CONNECTION_MODE_AUTOMATIC)
+
+    assert (result["type"], result["reason"]) == (
+        data_entry_flow.FlowResultType.ABORT,
+        "cannot_connect",
+    )
+
+
 async def test_reconfigure_switches_to_local_only_without_replacing_identity(
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
@@ -382,6 +404,52 @@ async def test_reconfigure_repins_a_changed_local_broker_address(
     assert pin_calls == ["192.0.2.11"]
     assert entry.data[CONF_LOCAL_HOST] == "192.0.2.11"
     assert entry.data[CONF_SERVER_CA_CERTIFICATE] == "new server CA"
+
+
+async def test_reconfigure_repins_an_automatic_entry_at_the_same_address(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_cloud_setup(monkeypatch)
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow._pin_credentials",
+        lambda credentials, host: "rotated server CA",
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data={
+            **_base_entry_data(),
+            CONF_CONNECTION_MODE: CONNECTION_MODE_AUTOMATIC,
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "old-secret",
+        },
+        version=1,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_AUTOMATIC,
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "",
+            CONF_LOCAL_HOST: "192.0.2.10",
+        },
+    )
+
+    assert (
+        result["reason"],
+        entry.data[CONF_SERVER_CA_CERTIFICATE],
+    ) == ("reconfigure_successful", "rotated server CA")
 
 
 async def test_reconfigure_cloud_only_to_automatic_discovers_local_address(
@@ -608,6 +676,8 @@ async def test_diagnostics_redact_all_credentials(
     assert "secret" not in serialized
     assert "parent@example.com" not in serialized
     assert "client private key" not in serialized
+    assert "192.0.2.10" not in serialized
+    assert diagnostics["config_entry"][CONF_BABY_ID] != 42
     assert diagnostics["coordinator"]["active_provider"] == "local"
     assert "error" not in diagnostics["coordinator"]["providers"]["local"]
 

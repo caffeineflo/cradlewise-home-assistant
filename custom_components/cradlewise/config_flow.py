@@ -332,11 +332,7 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             errors["base"] = "cannot_find_device"
 
             server_ca = entry.data.get(CONF_SERVER_CA_CERTIFICATE)
-            if (
-                not errors
-                and mode != CONNECTION_MODE_CLOUD
-                and (local_host != current_host or mode == CONNECTION_MODE_LOCAL)
-            ):
+            if not errors and mode != CONNECTION_MODE_CLOUD:
                 try:
                     server_ca = await self.hass.async_add_executor_job(
                         _pin_credentials,
@@ -452,26 +448,29 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.hass.config.country or "US",
                 self._mode != CONNECTION_MODE_CLOUD,
             )
-            server_ca = None
-            if self._mode != CONNECTION_MODE_CLOUD:
-                if local_host is None:
-                    if self._mode == CONNECTION_MODE_LOCAL:
-                        return self.async_abort(reason="cannot_find_device")
-                else:
+        except CloudAuthenticationError:
+            return self.async_abort(reason="invalid_auth")
+        except (CloudApiError, CloudProvisioningError):
+            return self.async_abort(reason="cannot_connect")
+        except OSError:
+            return self.async_abort(reason="cannot_connect")
+
+        server_ca = None
+        if self._mode != CONNECTION_MODE_CLOUD:
+            if local_host is None:
+                if self._mode == CONNECTION_MODE_LOCAL:
+                    return self.async_abort(reason="cannot_find_device")
+            else:
+                try:
                     server_ca = await self.hass.async_add_executor_job(
                         _pin_credentials,
                         credentials,
                         local_host,
                     )
-        except CloudAuthenticationError:
-            return self.async_abort(reason="invalid_auth")
-        except (CloudApiError, CloudProvisioningError):
-            return self.async_abort(reason="cannot_connect")
-        except (BrokerCertificateError, OSError):
-            if self._mode == CONNECTION_MODE_LOCAL:
-                return self.async_abort(reason="cannot_connect_local")
-            local_host = None
-            server_ca = None
+                except (BrokerCertificateError, OSError):
+                    if self._mode == CONNECTION_MODE_LOCAL:
+                        return self.async_abort(reason="cannot_connect_local")
+                    local_host = None
 
         data: dict[str, Any] = {
             CONF_NAME: account.name or DEFAULT_NAME,

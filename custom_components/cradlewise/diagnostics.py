@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from . import CradlewiseConfigEntry
 from .const import (
+    CONF_BABY_ID,
     CONF_BEARER_TOKEN,
     CONF_BRIDGE_API_VERSION,
     CONF_BRIDGE_STATUS_URL,
@@ -19,6 +20,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_EMAIL,
     CONF_GROUP_CA_CERTIFICATE,
+    CONF_LOCAL_HOST,
     CONF_PASSWORD,
     CONF_SERVER_CA_CERTIFICATE,
     CONF_SNAPSHOT_URL,
@@ -27,6 +29,7 @@ from .const import (
 from .status_helpers import path_value
 
 TO_REDACT = {
+    CONF_BABY_ID,
     CONF_BEARER_TOKEN,
     CONF_BRIDGE_STATUS_URL,
     CONF_CLIENT_CERTIFICATE,
@@ -35,6 +38,7 @@ TO_REDACT = {
     CONF_DEVICE_ID,
     CONF_EMAIL,
     CONF_GROUP_CA_CERTIFICATE,
+    CONF_LOCAL_HOST,
     CONF_PASSWORD,
     CONF_SERVER_CA_CERTIFICATE,
     CONF_SNAPSHOT_URL,

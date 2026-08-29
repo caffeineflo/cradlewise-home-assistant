@@ -222,7 +222,10 @@ configured companion URL.
 Use Reconfigure to change connection mode, account credentials, or the local
 crib address without replacing the config entry. A changed local address is
 accepted only after the broker certificate chain and IP SAN are validated and
-the Greengrass CA is pinned. Do not edit Home Assistant storage files.
+the existing Greengrass CA is confirmed. Automatic rediscovery never replaces
+a different pinned CA. Reconfigure explicitly revalidates and trusts the
+broker's current core CA, including a firmware-driven CA change at the same
+address. Do not edit Home Assistant storage files.
 
 ### Entity Surface
 
