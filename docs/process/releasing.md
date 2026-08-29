@@ -17,9 +17,18 @@ PyPI and making the HACS repository public are external, irreversible actions.
    - Environment: `pypi`
 3. Create a protected GitHub Actions environment named `pypi` and require
    approval before deployment.
+4. In the `cradlewise-local-bridge` package settings:
+   - Grant `caffeineflo/cradlewise-home-assistant` write access under
+     "Manage Actions access".
+   - Change the package visibility to public.
+   - Connect the package to `caffeineflo/cradlewise-home-assistant` instead of
+     an archived or renamed source repository.
 
-No PyPI token is stored in GitHub. The release workflow receives a short-lived
-OIDC publishing identity only after the environment is approved.
+No PyPI token or GHCR credential is stored in GitHub. The release workflow
+receives a short-lived PyPI OIDC publishing identity only after the environment
+is approved, and GitHub provides the tag workflow a repository-scoped package
+token. Ordinary pull request and `main` CI builds the bridge image without
+publishing it.
 
 ## Release checklist
 
