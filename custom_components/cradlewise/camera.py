@@ -1,4 +1,4 @@
-"""Camera platform for Cradlewise local bridge streams."""
+"""Optional camera platform for Cradlewise media companion streams."""
 
 from __future__ import annotations
 
@@ -18,13 +18,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import CradlewiseConfigEntry
 from .config_helpers import same_url_origin, snapshot_url_from_status_url
 from .const import (
-    CONF_BEARER_TOKEN,
     CONF_BRIDGE_STATUS_URL,
     CONF_CRADLE_ID,
     CONF_SNAPSHOT_URL,
     CONF_STREAM_URL,
 )
-from .coordinator import CradlewiseStatusCoordinator, request_headers
+from .coordinator import CradlewiseCoordinator, request_headers
 from .entity import device_info
 from .status_helpers import path_value, strict_bool
 
@@ -37,6 +36,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Cradlewise camera from a config entry."""
+    config = {**entry.data, **entry.options}
+    if not config.get(CONF_STREAM_URL):
+        return
     async_add_entities([CradlewiseBridgeCamera(entry, entry.runtime_data.coordinator)])
 
 
@@ -51,23 +53,24 @@ class CradlewiseBridgeCamera(Camera):
     def __init__(
         self,
         entry: CradlewiseConfigEntry,
-        coordinator: CradlewiseStatusCoordinator | None,
+        coordinator: CradlewiseCoordinator,
     ) -> None:
         super().__init__()
         self._entry = entry
         self._coordinator = coordinator
-        self._stream_url = entry.data[CONF_STREAM_URL]
-        self._snapshot_url = entry.data.get(CONF_SNAPSHOT_URL)
-        if not self._snapshot_url and entry.data.get(CONF_BRIDGE_STATUS_URL):
+        config = {**entry.data, **entry.options}
+        self._stream_url = config[CONF_STREAM_URL]
+        self._snapshot_url = config.get(CONF_SNAPSHOT_URL)
+        if not self._snapshot_url and config.get(CONF_BRIDGE_STATUS_URL):
             self._snapshot_url = snapshot_url_from_status_url(
-                entry.data[CONF_BRIDGE_STATUS_URL]
+                config[CONF_BRIDGE_STATUS_URL]
             )
         self._attr_unique_id = f"{entry.data[CONF_CRADLE_ID]}_camera"
 
     @property
     def available(self) -> bool:
         """Return whether the optional status endpoint is reachable."""
-        return self._coordinator is None or (
+        return (
             self._coordinator.last_update_success
             and strict_bool(path_value(self._coordinator.data, ("bridge", "healthy")))
             is True
@@ -81,10 +84,9 @@ class CradlewiseBridgeCamera(Camera):
     async def async_added_to_hass(self) -> None:
         """Subscribe the camera to coordinator availability updates."""
         await super().async_added_to_hass()
-        if self._coordinator is not None:
-            self.async_on_remove(
-                self._coordinator.async_add_listener(self.async_write_ha_state)
-            )
+        self.async_on_remove(
+            self._coordinator.async_add_listener(self.async_write_ha_state)
+        )
         stream_settings = await get_dynamic_camera_stream_settings(
             self.hass, self.entity_id
         )
@@ -132,14 +134,11 @@ class CradlewiseBridgeCamera(Camera):
             )
 
         session = async_get_clientsession(self.hass)
-        bridge_status_url = self._entry.data.get(CONF_BRIDGE_STATUS_URL)
+        config = {**self._entry.data, **self._entry.options}
+        bridge_status_url = config.get(CONF_BRIDGE_STATUS_URL)
         bearer_token = None
         if bridge_status_url and same_url_origin(self._snapshot_url, bridge_status_url):
-            bearer_token = (
-                self._coordinator.bearer_token
-                if self._coordinator is not None
-                else self._entry.data.get(CONF_BEARER_TOKEN)
-            )
+            bearer_token = self._coordinator.bearer_token
         try:
             async with session.get(
                 self._snapshot_url,

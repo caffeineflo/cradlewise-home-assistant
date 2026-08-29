@@ -1,104 +1,122 @@
 # Cradlewise
 
-Cradlewise bridges a Cradlewise smart crib into Home Assistant with a
-local audio/video stream, local device state, and selected crib controls.
+Cradlewise is an unofficial, local-first Home Assistant integration for the
+Cradlewise smart crib. State and controls work without a video bridge. Cloud
+fallback and live media are independent choices.
 
-The bridge connects to the crib over the LAN using the local Greengrass
-MQTT/WebRTC path, publishes an ordinary RTSP stream, and exposes a small HTTP
-status/command API. The Home Assistant custom integration creates a camera
-entity from that RTSP stream and maps current bridge/device state into a
-deliberately limited default entity surface.
+This project is based on interoperability research against the Cradlewise
+Android app and crib firmware. It is not affiliated with or supported by
+Cradlewise.
+
+The current protocol surface is validated against Android app 2.55.5
+(version code 204) and live crib firmware 0.2.73.
 
 ## Status
 
-This is pre-release software running in a live Home Assistant setup. The code is
-being prepared for a public custom HACS release before applying to the default
-HACS catalog.
+This is pre-release software being hardened against a live crib before its
+first HACS release. The supported release surface is intentionally small:
 
-CI runs hassfest on every change. The HACS validator reads repository files
-through GitHub's public raw-content endpoint, so that step remains present but
-activates only after the repository becomes public. It has no ignored checks.
+- Direct local MQTT state and controls over the crib's mTLS Greengrass broker
+- Cradlewise AWS IoT MQTT state and controls for cloud fallback or cloud-only use
+- Automatic local-first provider selection without retrying a command across
+  providers
+- Account reauthentication and in-place connection-mode changes
+- 30 focused entities without media, or 31 with the optional camera
+- 28 entities enabled by default without media; state-source and state-update
+  diagnostics are opt-in
+- An optional, separately deployed WebRTC-to-RTSP media companion
+- Privacy-safe Home Assistant diagnostics with credentials and certificate
+  material redacted
 
-Working now:
+The official Cradlewise Data API is not required. It remains a possible future
+analytics provider for users who want subscription-backed sleep history.
 
-- Local H264 video copied to RTSP without re-encoding
-- Crib audio muxed into the same RTSP stream as AAC mono
-- Home Assistant camera entity
-- A 35-entity default Home Assistant surface, with 78 advanced configuration
-  and diagnostic entities available but disabled by default
-- Bridge health based on MQTT, WebRTC, recent video, and the RTSP sink
-- APK-backed baby, sleep, bounce, music, light, firmware, WiFi, breath,
-  lullaby, and crib setting state from the crib's local MQTT shadow
-- APK-backed Home Assistant controls for normal soothing/settings actions.
-  Discrete APK values use selects, and amplitude, duration, and volume controls
-  honor the device-advertised limits.
-- Optional official Data API analytics for total, day, and night sleep, nap
-  count, longest stretch, and soothe count.
+## Connection modes
 
-Still planned:
+| Mode | Local MQTT | Cradlewise cloud | Stored account password |
+|---|---:|---:|---:|
+| Automatic | Preferred | Fallback | Yes |
+| Local only | Yes | Setup only | No |
+| Cloud only | No | Yes | Yes |
 
-- A tagged `v0.1.0` GitHub release and public bridge image
-- Home Assistant Brands registration for default HACS catalog submission
-- More fixture coverage for alternate Cradlewise payload shapes
+All three modes use a device certificate provisioned through the same backend
+flow as the Android app. Local-only setup uses the account once for discovery
+and provisioning, then discards the email and password. Automatic and
+cloud-only modes retain them in the Home Assistant config entry so temporary
+AWS credentials can be renewed and the REST fallback can reauthenticate.
+
+Cloud only applies to state and controls. If the optional media companion is
+configured, its local camera can remain available, but Home Assistant does not
+read device state from it or send commands through it in Cloud only mode. It
+polls only the companion's authenticated semantic health endpoint to report
+camera availability accurately.
+
+Automatic mode rediscoveries also revalidate and replace a rotated local
+broker CA. In Local only mode, run the integration's Reconfigure action after
+a crib firmware update if the local connection stops working; submitting the
+existing address revalidates and repins that broker without storing account
+credentials.
 
 ## Architecture
 
 ```text
-Cradlewise crib
-  -> local MQTT/WebRTC over LAN
-  -> cradlewise-local bridge
-  -> RTSP H264 passthrough + AAC audio
+Home Assistant integration
+  -> cradlewise-client (state, controls, discovery, certificate provisioning)
+     -> local crib MQTT, preferred in Automatic mode
+     -> Cradlewise AWS IoT MQTT, fallback or Cloud-only mode
+     -> low-rate Cradlewise REST state fallback
+
+Optional media companion
+  -> local crib MQTT/WebRTC
+  -> H264 passthrough and AAC audio
   -> MediaMTX or another RTSP server
-  -> Home Assistant camera
-
-Official Cradlewise Data API (optional)
-  -> cradlewise-local bridge analytics client
-  -> bridge status API
-  -> Home Assistant sleep sensors
-
-Consumer observability (optional)
-  -> authenticated Prometheus-compatible pull endpoint
-  -> consumer-owned Sentry-compatible error destination
+  -> optional Home Assistant camera entity
 ```
 
-The bridge gets normal device state directly from the crib's local MQTT
-shadow. Optional `CRADLEWISE_EMAIL` and `CRADLEWISE_PASSWORD` credentials can
-provide a cloud fallback, but they are not required for normal operation.
+`packages/cradlewise-client/` is a media-free Python distribution. The
+`custom_components/cradlewise/` package is the HACS integration. The existing
+`cradlewise_local/` application owns the optional video companion and its
+container-facing status API. The integration never starts WebRTC or processes
+nursery audio/video unless the consumer separately deploys and configures that
+companion.
 
-Local connection failures do not terminate the status API or cloud pollers.
-The bridge retries MQTT, WebRTC, and RTSP with bounded backoff, reports the
-last error through `/state`, keeps `/live` available for container routing, and
-returns `503` from `/health` until media is healthy again.
+When the media companion is configured, it owns the local MQTT identity used
+for WebRTC signaling and local state. Home Assistant does not open a competing
+local MQTT session. Automatic mode can still keep the independent AWS IoT
+provider ready as fallback. Cloud only can use the companion's camera without
+using its local state or command path.
 
-The repository intentionally keeps two runtime layers separate without forcing
-a multi-repository release. `cradlewise_local/` owns crib protocols, streaming,
-cloud fallback, and official Data API normalization. The HACS-installed
-`custom_components/cradlewise_local/` package is a thin Home Assistant adapter
-that only talks to the bridge HTTP and RTSP endpoints. This boundary can become
-a standalone Python package later if other consumers need it.
+## Home Assistant installation
 
-## Home Assistant Installation
+Until the first tagged release is published:
 
-Until this has a tagged HACS release, install it as a custom repository:
+1. Add this repository to HACS as a custom `Integration` repository.
+2. Install `Cradlewise` and restart Home Assistant.
+3. Open Settings -> Devices & services -> Add Integration -> Cradlewise.
+4. Choose Automatic, Local only, or Cloud only.
+5. Sign in once so the integration can discover the crib and provision its
+   device certificate.
 
-1. In HACS, add this repository as a custom repository.
-2. Choose category `Integration`.
-3. Install `Cradlewise`.
-4. Restart Home Assistant.
-5. Add `Cradlewise` from Settings -> Devices & services.
+To add video later, open the integration's Configure action and enter the media
+companion URL and bearer token. Leaving the URL blank removes the camera and
+does not affect state, controls, device identity, or the other entities.
 
-The integration asks only for the bridge URL and bearer token. It reads the
-authenticated, versioned `/info` contract and derives the cradle ID, stream,
-snapshot, state, and command endpoints. Reconfiguring the bridge address or
-token preserves the existing cradle-based config-entry identity, entity unique
-IDs, and HomeKit accessory identity.
+Another community integration already uses the `cradlewise` domain. Home
+Assistant cannot load two integrations with the same domain, so remove
+`jlamendo/ha-cradlewise` before installing this repository. This project keeps
+the canonical domain because it is not replacing a built-in integration and
+the other repository is not in the default HACS catalog.
 
-With the bridge configured, the default entity set contains the
-camera and the high-value baby, sleep, safety, soothing, and environment state
-and controls. Configuration and diagnostic entities are present in the entity
-registry but disabled by default. An upgrade from config entry version 1
-removes obsolete duplicate/cross-domain registry entries and preserves the
-unique IDs of retained entities.
+The first public HACS release depends on the separately versioned
+`cradlewise-client` package. Tag CI publishes the matching client version to
+PyPI after validation and before you create the full GitHub release.
+
+See [Release Process](docs/process/releasing.md) for the guarded PyPI and HACS
+release sequence.
+
+Existing pre-release users should follow
+[Migrating From `cradlewise_local`](docs/process/migrating-from-cradlewise-local.md)
+to validate both integrations side by side and preserve referenced entity IDs.
 
 ## Optional Wake Event Recording
 
@@ -172,7 +190,9 @@ fallback. Nurture Plus users can request a read-only Data API token from
 Cradlewise and set `CRADLEWISE_DATA_API_TOKEN`, or mount it through
 `CRADLEWISE_DATA_API_TOKEN_FILE`. The bridge polls the two sleep endpoints every
 15 minutes by default, which stays well below the documented rate limit. The
-six analytics entities remain unavailable when no token is configured and do
+results remain available through the companion status API for advanced or
+legacy consumers. The HACS integration does not create analytics entities yet;
+capability-driven Data API analytics remain a future, explicit opt-in and do
 not affect local streaming, device state, or controls.
 
 Run the development/trusted-LAN example bridge stack:
@@ -198,11 +218,11 @@ HTTP `Host("cradlewise-api.example.com")` router terminates HTTPS to bridge port
 RTSPS to MediaMTX port 8554. Plain RTSP remains inside Docker between the
 bridge, MediaMTX, and Traefik.
 
-Reconfigure the existing Home Assistant config entry with the HTTPS and RTSPS
-URLs. Update the existing Scrypted Rebroadcast/Prebuffer device's source URL in
-place. Do not delete and recreate either integration/device; keeping the same
-HA entry, Scrypted device, and HomeKit accessory preserves downstream identity
-and client metadata.
+Add the companion through the Cradlewise integration's Configure action using
+the HTTPS API URL. Its authenticated `/info` response supplies the RTSPS URL.
+Update an existing Scrypted Rebroadcast/Prebuffer device's source URL in place
+if Scrypted also consumes the stream. Do not recreate an existing Scrypted or
+HomeKit accessory just to change its source URL.
 
 The status server binds to loopback by default. The Compose example explicitly
 binds it inside the container and requires `CRADLEWISE_STATUS_TOKEN`. Loopback
@@ -260,7 +280,7 @@ uv run --extra test python -m pytest
 Compile-check the Python files:
 
 ```bash
-uv run python -m compileall cradlewise_local custom_components tests stream_local.py cradlewise_api.py
+uv run python -m compileall cradlewise_local custom_components packages tests stream_local.py cradlewise_api.py
 ```
 
 Run the bridge without Docker:

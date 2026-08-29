@@ -1,6 +1,6 @@
 # Private Observability
 
-Cradlewise Local exposes standard observability hooks without selecting or
+The optional Cradlewise media companion exposes standard observability hooks without selecting or
 operating a monitoring backend for the consumer. All outbound reporting is off
 by default.
 
@@ -79,6 +79,7 @@ With no DSN, no error-reporting connection is attempted.
 ## Home Assistant diagnostics
 
 Home Assistant diagnostics are generated only when a user manually downloads
-them. The integration redacts the bearer token, bridge and stream URLs, cradle
-ID, and snapshot URL. It includes versions, connection health, reconnect and
-frame counters, and data freshness, but not raw nursery or baby state.
+them. The integration redacts account credentials, device certificate
+material, the bearer token, bridge and stream URLs, cradle ID, device ID, and
+snapshot URL. It includes versions, provider health, reconnect and frame
+counters, and data freshness, but not raw nursery or baby state.

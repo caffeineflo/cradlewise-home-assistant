@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import time
-from copy import deepcopy
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -10,14 +8,10 @@ import pytest
 
 try:
     from homeassistant import config_entries, data_entry_flow
-    from homeassistant.components.camera import Camera
-    from homeassistant.components.camera.const import DATA_CAMERA_PREFS
-    from homeassistant.components.stream import HLS_PROVIDER
     from homeassistant.config_entries import ConfigEntryState
-    from homeassistant.const import CONF_NAME, STATE_UNAVAILABLE
+    from homeassistant.const import CONF_EMAIL, CONF_NAME, CONF_PASSWORD
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers import entity_registry as er
-    from homeassistant.helpers.update_coordinator import UpdateFailed
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 except ModuleNotFoundError:
     pytest.skip(
@@ -25,17 +19,33 @@ except ModuleNotFoundError:
         allow_module_level=True,
     )
 
-from custom_components.cradlewise_local import async_migrate_entry
-from custom_components.cradlewise_local.camera import CradlewiseBridgeCamera
-from custom_components.cradlewise_local.const import (
+from cradlewise_client.cloud import CradleAccount, ProvisionedCredentials
+
+from custom_components.cradlewise.config_flow import CradlewiseOptionsFlow
+from custom_components.cradlewise.const import (
+    CONF_BABY_ID,
     CONF_BEARER_TOKEN,
     CONF_BRIDGE_API_VERSION,
     CONF_BRIDGE_STATUS_URL,
     CONF_BRIDGE_VERSION,
+    CONF_CLIENT_CERTIFICATE,
+    CONF_CLIENT_PRIVATE_KEY,
+    CONF_CONNECTION_MODE,
     CONF_CRADLE_ID,
+    CONF_DEVICE_ID,
+    CONF_GROUP_CA_CERTIFICATE,
+    CONF_LOCAL_HOST,
+    CONF_SERVER_CA_CERTIFICATE,
     CONF_SNAPSHOT_URL,
     CONF_STREAM_URL,
+    CONNECTION_MODE_AUTOMATIC,
+    CONNECTION_MODE_CLOUD,
+    CONNECTION_MODE_LOCAL,
     DOMAIN,
+)
+from custom_components.cradlewise.coordinator import CradlewiseCoordinator
+from custom_components.cradlewise.diagnostics import (
+    async_get_config_entry_diagnostics,
 )
 
 pytestmark = [
@@ -44,44 +54,64 @@ pytestmark = [
 ]
 
 CRADLE_ID = "00000000-0000-4000-8000-000000000001"
+DEVICE_ID = "00000000-0000-4000-8000-000000000002"
 BRIDGE_URL = "http://bridge.test:8088"
 STATE_URL = f"{BRIDGE_URL}/state"
 INFO_URL = f"{BRIDGE_URL}/info"
 STREAM_URL = "rtsp://bridge.test:8560/cradlewise"
 TOKEN = "test-bearer-token"
 
-ANCHOR_KEYS = {
-    "baby_present",
-    "baby_needs_attention",
-    "baby_needs_help",
-    "loud_sound_detected",
-    "sleep_phase",
-    "sleep_state",
-}
 
-ANALYTICS_VALUES = {
-    "total_sleep_today": 120,
-    "day_sleep_today": 30,
-    "night_sleep_today": 90,
-    "naps_today": 2,
-    "longest_stretch_today": 90,
-    "soothes_today": 3,
-}
+def _credentials() -> ProvisionedCredentials:
+    return ProvisionedCredentials(
+        device_id=DEVICE_ID,
+        client_certificate="client certificate",
+        client_private_key="client private key",
+        group_ca_certificate="group CA",
+    )
 
 
-def _bridge_payload(*, updated_at: float | None = None) -> dict[str, Any]:
-    timestamp = time.time() if updated_at is None else updated_at
+def _account() -> CradleAccount:
+    return CradleAccount(baby_id=42, cradle_id=CRADLE_ID, name="Nursery Crib")
+
+
+def _base_entry_data() -> dict[str, Any]:
+    credentials = _credentials()
     return {
-        "bridge": {
-            "cradle_id": CRADLE_ID,
-            "healthy": True,
-        },
+        CONF_NAME: "Nursery Crib",
+        CONF_CONNECTION_MODE: CONNECTION_MODE_LOCAL,
+        CONF_BABY_ID: 42,
+        CONF_CRADLE_ID: CRADLE_ID,
+        CONF_LOCAL_HOST: "192.0.2.10",
+        CONF_DEVICE_ID: credentials.device_id,
+        CONF_CLIENT_CERTIFICATE: credentials.client_certificate,
+        CONF_CLIENT_PRIVATE_KEY: credentials.client_private_key,
+        CONF_GROUP_CA_CERTIFICATE: credentials.group_ca_certificate,
+        CONF_SERVER_CA_CERTIFICATE: "server CA",
+    }
+
+
+def _bridge_info(cradle_id: str = CRADLE_ID) -> dict[str, Any]:
+    return {
+        "api_version": 1,
+        "bridge_version": "0.1.0",
+        "device": {"id": cradle_id},
+        "capabilities": {"camera": True},
+        "endpoints": {"state": "/state", "snapshot": "/snapshot.jpg"},
+        "stream": {"url": STREAM_URL},
+    }
+
+
+def _bridge_payload() -> dict[str, Any]:
+    timestamp = time.time()
+    return {
+        "bridge": {"cradle_id": CRADLE_ID, "healthy": True},
         "mqtt": {"connected": True},
         "webrtc": {
             "connection_state": "connected",
             "ice_connection_state": "connected",
         },
-        "media": {"audio_track": True},
+        "media": {"video_track": True, "audio_track": True},
         "cradle_state": {
             "updated_at": timestamp,
             "wifi_strength": -45,
@@ -89,8 +119,7 @@ def _bridge_payload(*, updated_at: float | None = None) -> dict[str, Any]:
         },
         "device_state": {
             "updated_at": timestamp,
-            "source": "cloud",
-            "baby_present": True,
+            "baby_present": False,
             "baby_needs_attention": False,
             "baby_needs_help": False,
             "crib_helping": False,
@@ -99,225 +128,185 @@ def _bridge_payload(*, updated_at: float | None = None) -> dict[str, Any]:
             "rocking_not_effective": False,
             "obstruction_detected": False,
             "lower_breath_rate_alert": False,
-            "sleep_phase": "sleep",
-            "sleep_state": "Light sleep",
+            "sleep_phase": "away",
+            "sleep_state": "Baby not present",
+            "bouncing": False,
+            "bounce_mode": 0,
+            "bounce_level": 0,
+            "bounce_amplitude": 20,
+            "bounce_duration": 10,
+            "bounce_duration_limit": 30,
             "bounce_time_remaining": 0,
+            "music_playing": False,
+            "music_mode": 0,
+            "music_level": 0,
+            "music_volume": 25,
             "music_mood": "calm",
-            "ambient_temperature": 22,
+            "music_duration": 60,
+            "music_time_remaining": 0,
+            "adaptive_soothing_enabled": True,
+            "max_bounce_limit": 60,
+            "max_volume_limit": 80,
             "software_version": "0.2.72",
         },
-        "analytics": {
-            "available": True,
-            "updated_at": timestamp,
-            **ANALYTICS_VALUES,
-        },
     }
 
 
-def _bridge_info(
-    *,
-    cradle_id: str = CRADLE_ID,
-    stream_url: str = STREAM_URL,
-) -> dict[str, Any]:
+def _bridge_entry_data() -> dict[str, Any]:
     return {
-        "api_version": 1,
-        "bridge_version": "0.1.0",
-        "device": {"id": cradle_id},
-        "capabilities": {"camera": True},
-        "endpoints": {
-            "state": "/state",
-            "snapshot": "/snapshot.jpg",
-        },
-        "stream": {"url": stream_url},
-    }
-
-
-def _user_input(
-    *,
-    bridge_url: str = BRIDGE_URL,
-    token: str = TOKEN,
-) -> dict[str, str]:
-    return {
-        CONF_BRIDGE_STATUS_URL: bridge_url,
-        CONF_BEARER_TOKEN: token,
-    }
-
-
-def _entry_data(
-    *,
-    bridge_url: str = BRIDGE_URL,
-    token: str = TOKEN,
-    name: str = "Cradlewise Local",
-) -> dict[str, Any]:
-    return {
-        CONF_NAME: name,
-        CONF_CRADLE_ID: CRADLE_ID,
+        **_base_entry_data(),
+        CONF_BRIDGE_STATUS_URL: BRIDGE_URL,
+        CONF_BEARER_TOKEN: TOKEN,
         CONF_STREAM_URL: STREAM_URL,
-        CONF_BRIDGE_STATUS_URL: bridge_url,
-        CONF_BEARER_TOKEN: token,
-        CONF_SNAPSHOT_URL: f"{bridge_url}/snapshot.jpg",
+        CONF_SNAPSHOT_URL: f"{BRIDGE_URL}/snapshot.jpg",
         CONF_BRIDGE_API_VERSION: 1,
         CONF_BRIDGE_VERSION: "0.1.0",
     }
 
 
-async def _setup_entry(
-    hass: HomeAssistant,
-    aioclient_mock: Any,
-    *,
-    payload: dict[str, Any] | None = None,
-) -> MockConfigEntry:
-    aioclient_mock.get(STATE_URL, json=payload or _bridge_payload())
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Cradlewise Local",
-        unique_id=CRADLE_ID,
-        data=_entry_data(),
-        version=3,
+def _mock_cloud_setup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.authenticate",
+        lambda self: None,
     )
-    entry.add_to_hass(hass)
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.list_accounts",
+        lambda self: [_account()],
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.provision_credentials",
+        lambda self, account, **kwargs: _credentials(),
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.get_cradle_ip",
+        lambda self, cradle_id: "192.0.2.10",
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow._pin_credentials",
+        lambda credentials, host: "server CA",
+    )
 
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    return entry
 
-
-def _registry_entries(
+async def _start_account_flow(
     hass: HomeAssistant,
-    entry: MockConfigEntry,
-) -> list[er.RegistryEntry]:
-    registry = er.async_get(hass)
-    return er.async_entries_for_config_entry(registry, entry.entry_id)
-
-
-def _anchor_entity_ids(
-    hass: HomeAssistant,
-    entry: MockConfigEntry,
-) -> dict[str, str]:
-    return {
-        registry_entry.unique_id.removeprefix(f"{CRADLE_ID}_"): registry_entry.entity_id
-        for registry_entry in _registry_entries(hass, entry)
-        if registry_entry.unique_id.removeprefix(f"{CRADLE_ID}_") in ANCHOR_KEYS
-    }
-
-
-def _entity_state(hass: HomeAssistant, entity_id: str) -> str:
-    state = hass.states.get(entity_id)
-    assert state is not None
-    return state.state
-
-
-async def test_config_flow_creates_entry_and_sends_bearer_token(
-    hass: HomeAssistant,
-    aioclient_mock: Any,
-) -> None:
-    aioclient_mock.get(INFO_URL, json=_bridge_info())
-
+    mode: str,
+) -> dict[str, Any]:
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_USER},
-        data=_user_input(),
+        data={CONF_CONNECTION_MODE: mode},
     )
+    assert result["type"] is data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "account"
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={CONF_EMAIL: "parent@example.com", CONF_PASSWORD: "secret"},
+    )
+
+
+async def test_automatic_setup_retains_cloud_credentials_and_provisions_local(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_cloud_setup(monkeypatch)
+
+    result = await _start_account_flow(hass, CONNECTION_MODE_AUTOMATIC)
 
     assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Cradlewise Local"
-    assert result["data"][CONF_BEARER_TOKEN] == TOKEN
-    assert result["data"][CONF_SNAPSHOT_URL] == f"{BRIDGE_URL}/snapshot.jpg"
-    assert any(
-        headers is not None and headers.get("Authorization") == f"Bearer {TOKEN}"
-        for _, _, _, headers in aioclient_mock.mock_calls
-    )
+    assert result["title"] == "Nursery Crib"
+    assert result["data"][CONF_CONNECTION_MODE] == CONNECTION_MODE_AUTOMATIC
+    assert result["data"][CONF_EMAIL] == "parent@example.com"
+    assert result["data"][CONF_PASSWORD] == "secret"
+    assert result["data"][CONF_LOCAL_HOST] == "192.0.2.10"
+    assert result["data"][CONF_SERVER_CA_CERTIFICATE] == "server CA"
 
 
-async def test_config_flow_maps_rejected_token_to_invalid_auth(
+async def test_local_only_setup_discards_account_credentials(
     hass: HomeAssistant,
-    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    aioclient_mock.get(INFO_URL, status=401)
+    _mock_cloud_setup(monkeypatch)
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": config_entries.SOURCE_USER},
-        data=_user_input(),
-    )
+    result = await _start_account_flow(hass, CONNECTION_MODE_LOCAL)
 
-    assert result["type"] is data_entry_flow.FlowResultType.FORM
-    assert result["errors"] == {"base": "invalid_auth"}
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert CONF_EMAIL not in result["data"]
+    assert CONF_PASSWORD not in result["data"]
 
 
-async def test_config_flow_does_not_misreport_proxy_forbidden_as_invalid_auth(
+async def test_cloud_only_setup_does_not_require_local_discovery(
     hass: HomeAssistant,
-    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    aioclient_mock.get(INFO_URL, status=403)
+    _mock_cloud_setup(monkeypatch)
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": config_entries.SOURCE_USER},
-        data=_user_input(),
+    def fail_local_discovery(self: object, cradle_id: str) -> str:
+        raise AssertionError("cloud-only setup must not discover the local broker")
+
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.get_cradle_ip",
+        fail_local_discovery,
     )
 
-    assert result["errors"] == {"base": "invalid_bridge_response"}
+    result = await _start_account_flow(hass, CONNECTION_MODE_CLOUD)
+
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_CONNECTION_MODE] == CONNECTION_MODE_CLOUD
+    assert CONF_LOCAL_HOST not in result["data"]
+    assert CONF_SERVER_CA_CERTIFICATE not in result["data"]
 
 
-async def test_config_flow_rejects_an_unsupported_bridge_api(
+async def test_automatic_setup_continues_when_the_local_broker_is_offline(
     hass: HomeAssistant,
-    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    info = _bridge_info()
-    info["api_version"] = 2
-    aioclient_mock.get(INFO_URL, json=info)
+    _mock_cloud_setup(monkeypatch)
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": config_entries.SOURCE_USER},
-        data=_user_input(),
+    def fail_pin(credentials: ProvisionedCredentials, host: str) -> str:
+        raise OSError("local broker unavailable")
+
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow._pin_credentials",
+        fail_pin,
     )
 
-    assert result["errors"] == {"base": "unsupported_bridge"}
+    result = await _start_account_flow(hass, CONNECTION_MODE_AUTOMATIC)
+
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_EMAIL] == "parent@example.com"
+    assert CONF_LOCAL_HOST not in result["data"]
+    assert CONF_SERVER_CA_CERTIFICATE not in result["data"]
 
 
-async def test_config_flow_aborts_duplicate_cradle(
+async def test_reconfigure_switches_to_local_only_without_replacing_identity(
     hass: HomeAssistant,
-    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    existing = MockConfigEntry(
-        domain=DOMAIN,
-        title="Existing Cradlewise",
-        unique_id=CRADLE_ID,
-        data=_entry_data(),
-        version=3,
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow._pin_credentials",
+        lambda credentials, host: "refreshed server CA",
     )
-    existing.add_to_hass(hass)
-    aioclient_mock.get(INFO_URL, json=_bridge_info())
-
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": config_entries.SOURCE_USER},
-        data=_user_input(),
+    schedule_reload = Mock()
+    monkeypatch.setattr(
+        hass.config_entries,
+        "async_schedule_reload",
+        schedule_reload,
     )
-
-    assert result["type"] is data_entry_flow.FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
-
-
-async def test_reconfigure_updates_urls_and_token_without_changing_identity(
-    hass: HomeAssistant,
-    aioclient_mock: Any,
-) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
-        title="Old Cradlewise",
+        title="Nursery Crib",
         unique_id=CRADLE_ID,
-        data=_entry_data(token="old-token", name="Old Cradlewise"),
-        version=3,
+        data={
+            **_base_entry_data(),
+            CONF_CONNECTION_MODE: CONNECTION_MODE_AUTOMATIC,
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "old-secret",
+        },
+        version=1,
     )
     entry.add_to_hass(hass)
-    new_bridge_url = "http://new-bridge.test:8088"
-    aioclient_mock.get(f"{new_bridge_url}/info", json=_bridge_info())
-    aioclient_mock.get(f"{new_bridge_url}/state", json=_bridge_payload())
 
-    initial = await hass.config_entries.flow.async_init(
+    result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={
             "source": config_entries.SOURCE_RECONFIGURE,
@@ -325,345 +314,345 @@ async def test_reconfigure_updates_urls_and_token_without_changing_identity(
         },
     )
     result = await hass.config_entries.flow.async_configure(
-        initial["flow_id"],
-        user_input=_user_input(
-            bridge_url=new_bridge_url,
-            token="new-token",
-        ),
+        result["flow_id"],
+        user_input={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_LOCAL,
+            CONF_EMAIL: "",
+            CONF_PASSWORD: "",
+            CONF_LOCAL_HOST: "192.0.2.10",
+        },
     )
 
-    assert result["type"] is data_entry_flow.FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    assert entry.data[CONF_BRIDGE_STATUS_URL] == new_bridge_url
-    assert entry.data[CONF_BEARER_TOKEN] == "new-token"
-    assert entry.data[CONF_NAME] == "Old Cradlewise"
-    assert entry.data[CONF_SNAPSHOT_URL] == f"{new_bridge_url}/snapshot.jpg"
-    assert aioclient_mock.mock_calls[-1][3]["Authorization"] == "Bearer new-token"
-
-    await hass.async_block_till_done()
-    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert entry.unique_id == CRADLE_ID
+    assert entry.data[CONF_CONNECTION_MODE] == CONNECTION_MODE_LOCAL
+    assert entry.data[CONF_SERVER_CA_CERTIFICATE] == "refreshed server CA"
+    assert CONF_EMAIL not in entry.data
+    assert CONF_PASSWORD not in entry.data
+    assert schedule_reload.call_count == 0
 
 
-async def test_setup_and_unload_with_bridge_http(
+async def test_reconfigure_repins_a_changed_local_broker_address(
     hass: HomeAssistant,
-    aioclient_mock: Any,
-) -> None:
-    entry = await _setup_entry(hass, aioclient_mock)
-    camera = next(
-        registry_entry
-        for registry_entry in _registry_entries(hass, entry)
-        if registry_entry.unique_id == f"{CRADLE_ID}_camera"
-    )
-
-    assert entry.state is ConfigEntryState.LOADED
-    assert hass.states.get(camera.entity_id) is not None
-    assert await hass.config_entries.async_unload(entry.entry_id)
-    await hass.async_block_till_done()
-    assert entry.state is ConfigEntryState.NOT_LOADED
-
-
-async def test_reload_replaces_and_restarts_preloaded_camera_stream(
-    hass: HomeAssistant,
-    aioclient_mock: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    entry = await _setup_entry(hass, aioclient_mock)
-    registry_entry = next(
-        registry_entry
-        for registry_entry in _registry_entries(hass, entry)
-        if registry_entry.unique_id == f"{CRADLE_ID}_camera"
-    )
-    old_camera = hass.data["camera"].get_entity(registry_entry.entity_id)
-    stream_settings = await hass.data[DATA_CAMERA_PREFS].get_dynamic_stream_settings(
-        registry_entry.entity_id
-    )
-    await hass.data[DATA_CAMERA_PREFS].async_update(
-        registry_entry.entity_id, preload_stream=True
-    )
-    old_stop = AsyncMock()
-    old_camera.stream = SimpleNamespace(
-        dynamic_stream_settings=stream_settings,
-        stop=old_stop,
-    )
-    replacement_stream = SimpleNamespace(
-        dynamic_stream_settings=stream_settings,
-        add_provider=Mock(),
-        start=AsyncMock(),
-    )
+    _mock_cloud_setup(monkeypatch)
+    pin_calls: list[str] = []
 
-    async def create_replacement_stream(camera):
-        camera.stream = replacement_stream
-        return replacement_stream
+    def pin_changed_host(credentials: ProvisionedCredentials, host: str) -> str:
+        pin_calls.append(host)
+        return "new server CA"
 
     monkeypatch.setattr(
-        CradlewiseBridgeCamera,
-        "async_create_stream",
-        create_replacement_stream,
+        "custom_components.cradlewise.config_flow._pin_credentials",
+        pin_changed_host,
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data={
+            **_base_entry_data(),
+            CONF_CONNECTION_MODE: CONNECTION_MODE_AUTOMATIC,
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "old-secret",
+        },
+        version=1,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_AUTOMATIC,
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "",
+            CONF_LOCAL_HOST: "192.0.2.11",
+        },
     )
 
-    assert await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
-    replacement_camera = hass.data["camera"].get_entity(registry_entry.entity_id)
-
-    assert (
-        old_stop.await_count,
-        stream_settings.preload_stream,
-        replacement_camera is old_camera,
-        replacement_stream.add_provider.call_args.args,
-        replacement_stream.start.await_count,
-    ) == (
-        1,
-        True,
-        False,
-        (HLS_PROVIDER,),
-        1,
-    )
+    assert result["reason"] == "reconfigure_successful"
+    assert pin_calls == ["192.0.2.11"]
+    assert entry.data[CONF_LOCAL_HOST] == "192.0.2.11"
+    assert entry.data[CONF_SERVER_CA_CERTIFICATE] == "new server CA"
 
 
-async def test_stream_stop_error_still_cleans_up_camera(
+async def test_reconfigure_cloud_only_to_automatic_discovers_local_address(
     hass: HomeAssistant,
-    aioclient_mock: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    entry = await _setup_entry(hass, aioclient_mock)
-    registry_entry = next(
-        registry_entry
-        for registry_entry in _registry_entries(hass, entry)
-        if registry_entry.unique_id == f"{CRADLE_ID}_camera"
-    )
-    camera = hass.data["camera"].get_entity(registry_entry.entity_id)
-    stream_settings = SimpleNamespace(preload_stream=True)
-    camera.stream = SimpleNamespace(
-        dynamic_stream_settings=stream_settings,
-        stop=AsyncMock(side_effect=RuntimeError("stop failed")),
-    )
-    parent_cleanup_calls = []
-
-    async def parent_cleanup(parent_camera):
-        parent_cleanup_calls.append(parent_camera)
-
-    monkeypatch.setattr(Camera, "async_will_remove_from_hass", parent_cleanup)
-
-    with pytest.raises(RuntimeError, match="stop failed"):
-        await camera.async_will_remove_from_hass()
-
-    assert (
-        camera.stream,
-        stream_settings.preload_stream,
-        parent_cleanup_calls,
-    ) == (None, True, [camera])
-
-
-async def test_entity_registry_defaults_match_policy_counts(
-    hass: HomeAssistant,
-    aioclient_mock: Any,
-) -> None:
-    entry = await _setup_entry(hass, aioclient_mock)
-    entries = _registry_entries(hass, entry)
-    enabled = sum(registry_entry.disabled_by is None for registry_entry in entries)
-    disabled = sum(
-        registry_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
-        for registry_entry in entries
-    )
-
-    assert (enabled, disabled, len(entries)) == (35, 78, 113)
-
-
-async def test_official_sleep_analytics_map_to_enabled_sensor_states(
-    hass: HomeAssistant,
-    aioclient_mock: Any,
-) -> None:
-    entry = await _setup_entry(hass, aioclient_mock)
-    states = {}
-    for registry_entry in _registry_entries(hass, entry):
-        key = registry_entry.unique_id.removeprefix(f"{CRADLE_ID}_")
-        if key in ANALYTICS_VALUES:
-            states[key] = _entity_state(hass, registry_entry.entity_id)
-
-    assert states == {key: str(value) for key, value in ANALYTICS_VALUES.items()}
-
-
-async def test_camera_and_anchor_unique_ids_are_stable(
-    hass: HomeAssistant,
-    aioclient_mock: Any,
-) -> None:
-    entry = await _setup_entry(hass, aioclient_mock)
-    entries = _registry_entries(hass, entry)
-    unique_ids = {registry_entry.unique_id for registry_entry in entries}
-    expected = {
-        f"{CRADLE_ID}_camera",
-        *(f"{CRADLE_ID}_{key}" for key in ANCHOR_KEYS),
-    }
-
-    assert expected <= unique_ids
-
-
-async def test_two_cradles_keep_separate_config_entry_identity(
-    hass: HomeAssistant,
-    aioclient_mock: Any,
-) -> None:
-    first_entry = await _setup_entry(hass, aioclient_mock)
-    second_cradle_id = "00000000-0000-4000-8000-000000000002"
-    second_bridge_url = "http://second-bridge.test:8088"
-    second_payload = deepcopy(_bridge_payload())
-    second_payload["bridge"]["cradle_id"] = second_cradle_id
-    aioclient_mock.get(f"{second_bridge_url}/state", json=second_payload)
-    second_entry = MockConfigEntry(
+    _mock_cloud_setup(monkeypatch)
+    entry = MockConfigEntry(
         domain=DOMAIN,
-        title="Second Cradlewise",
-        unique_id=second_cradle_id,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
         data={
-            **_entry_data(bridge_url=second_bridge_url, name="Second Cradlewise"),
-            CONF_CRADLE_ID: second_cradle_id,
+            key: value
+            for key, value in _base_entry_data().items()
+            if key not in {CONF_LOCAL_HOST, CONF_SERVER_CA_CERTIFICATE}
+        }
+        | {
+            CONF_CONNECTION_MODE: CONNECTION_MODE_CLOUD,
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "old-secret",
         },
-        version=3,
+        version=1,
     )
-    second_entry.add_to_hass(hass)
+    entry.add_to_hass(hass)
 
-    assert await hass.config_entries.async_setup(second_entry.entry_id)
-    await hass.async_block_till_done()
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_AUTOMATIC,
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "",
+            CONF_LOCAL_HOST: "",
+        },
+    )
 
-    first_unique_ids = {
-        entry.unique_id for entry in _registry_entries(hass, first_entry)
-    }
-    second_unique_ids = {
-        entry.unique_id for entry in _registry_entries(hass, second_entry)
-    }
-    assert len(first_unique_ids) == len(second_unique_ids) == 113
-    assert first_unique_ids.isdisjoint(second_unique_ids)
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_LOCAL_HOST] == "192.0.2.10"
+    assert entry.data[CONF_SERVER_CA_CERTIFICATE] == "server CA"
 
 
-async def test_anchor_entities_become_unavailable_when_state_is_stale(
+async def test_reauth_updates_credentials_for_the_existing_cradle(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_cloud_setup(monkeypatch)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data={
+            **_base_entry_data(),
+            CONF_CONNECTION_MODE: CONNECTION_MODE_AUTOMATIC,
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "old-secret",
+        },
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_REAUTH,
+            "entry_id": entry.entry_id,
+        },
+        data=dict(entry.data),
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_EMAIL: "new-parent@example.com",
+            CONF_PASSWORD: "new-secret",
+        },
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_EMAIL] == "new-parent@example.com"
+    assert entry.data[CONF_PASSWORD] == "new-secret"
+
+
+async def test_media_options_validate_identity_and_derive_endpoints(
     hass: HomeAssistant,
     aioclient_mock: Any,
 ) -> None:
-    entry = await _setup_entry(hass, aioclient_mock)
-    anchor_entity_ids = _anchor_entity_ids(hass, entry)
-    assert set(anchor_entity_ids) == ANCHOR_KEYS
-    assert all(
-        _entity_state(hass, entity_id) != STATE_UNAVAILABLE
-        for entity_id in anchor_entity_ids.values()
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    aioclient_mock.get(INFO_URL, json=_bridge_info())
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_BRIDGE_STATUS_URL: BRIDGE_URL,
+            CONF_BEARER_TOKEN: TOKEN,
+        },
     )
 
-    stale_payload = _bridge_payload(updated_at=time.time() - 121)
-    entry.runtime_data.coordinator.async_set_updated_data(stale_payload)
-    await hass.async_block_till_done()
-
-    assert all(
-        _entity_state(hass, entity_id) == STATE_UNAVAILABLE
-        for entity_id in anchor_entity_ids.values()
-    )
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_STREAM_URL] == STREAM_URL
+    assert result["data"][CONF_SNAPSHOT_URL] == f"{BRIDGE_URL}/snapshot.jpg"
 
 
-async def test_anchor_entities_reject_unknown_or_missing_values(
+async def test_media_options_reject_a_different_cradle(
     hass: HomeAssistant,
     aioclient_mock: Any,
 ) -> None:
-    entry = await _setup_entry(hass, aioclient_mock)
-    anchor_entity_ids = _anchor_entity_ids(hass, entry)
-    invalid_payload = deepcopy(_bridge_payload())
-    invalid_payload["device_state"].update(
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    flow = CradlewiseOptionsFlow(entry)
+    flow.hass = hass
+    aioclient_mock.get(
+        INFO_URL,
+        json=_bridge_info("00000000-0000-4000-8000-000000000099"),
+    )
+
+    result = await flow.async_step_init(
         {
-            "baby_present": "unknown",
-            "baby_needs_attention": 2,
-            "baby_needs_help": None,
-            "loud_sound_detected": "unavailable",
-            "sleep_phase": "",
-            "sleep_state": None,
+            CONF_BRIDGE_STATUS_URL: BRIDGE_URL,
+            CONF_BEARER_TOKEN: TOKEN,
         }
     )
 
-    entry.runtime_data.coordinator.async_set_updated_data(invalid_payload)
-    await hass.async_block_till_done()
-
-    assert all(
-        _entity_state(hass, entity_id) == STATE_UNAVAILABLE
-        for entity_id in anchor_entity_ids.values()
-    )
+    assert result["errors"] == {"base": "wrong_cradle"}
 
 
-async def test_coordinator_failure_marks_camera_and_anchors_unavailable(
+async def test_setup_with_media_creates_only_focused_entity_surface(
     hass: HomeAssistant,
     aioclient_mock: Any,
 ) -> None:
-    entry = await _setup_entry(hass, aioclient_mock)
-    registry_entries = _registry_entries(hass, entry)
-    observed = {
-        registry_entry.entity_id
-        for registry_entry in registry_entries
-        if registry_entry.unique_id
-        in {f"{CRADLE_ID}_camera", *(f"{CRADLE_ID}_{key}" for key in ANCHOR_KEYS)}
-    }
+    aioclient_mock.get(STATE_URL, json=_bridge_payload())
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_bridge_entry_data(),
+        version=1,
+    )
+    entry.add_to_hass(hass)
 
-    entry.runtime_data.coordinator.async_set_update_error(UpdateFailed("offline"))
+    assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert all(
-        _entity_state(hass, entity_id) == STATE_UNAVAILABLE for entity_id in observed
+    entries = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    enabled = sum(item.disabled_by is None for item in entries)
+    disabled = sum(
+        item.disabled_by is er.RegistryEntryDisabler.INTEGRATION for item in entries
     )
+    assert entry.state is ConfigEntryState.LOADED
+    assert (enabled, disabled, len(entries)) == (29, 2, 31)
+    assert any(item.domain == "camera" for item in entries)
 
 
-async def test_version_one_migration_removes_duplicates_and_disables_diagnostics(
+async def test_setup_without_media_creates_no_camera(
     hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def no_start(self: CradlewiseCoordinator) -> None:
+        return None
+
+    async def direct_snapshot(self: CradlewiseCoordinator) -> dict[str, Any]:
+        self._ingest_bridge(_bridge_payload())
+        return self._snapshot()
+
+    monkeypatch.setattr(CradlewiseCoordinator, "async_start", no_start)
+    monkeypatch.setattr(CradlewiseCoordinator, "_async_update_data", direct_snapshot)
     entry = MockConfigEntry(
         domain=DOMAIN,
-        title="Cradlewise Local",
+        title="Nursery Crib",
         unique_id=CRADLE_ID,
-        data=_entry_data(),
+        data=_base_entry_data(),
         version=1,
-        minor_version=1,
     )
     entry.add_to_hass(hass)
-    registry = er.async_get(hass)
-    duplicate = registry.async_get_or_create(
-        "binary_sensor",
-        DOMAIN,
-        f"{CRADLE_ID}_bouncing",
-        config_entry=entry,
-    )
-    diagnostic = registry.async_get_or_create(
-        "sensor",
-        DOMAIN,
-        f"{CRADLE_ID}_wifi_strength",
-        config_entry=entry,
-    )
-    retained = registry.async_get_or_create(
-        "sensor",
-        DOMAIN,
-        f"{CRADLE_ID}_sleep_state",
-        config_entry=entry,
-    )
 
-    assert await async_migrate_entry(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
 
-    migrated_diagnostic = registry.async_get(diagnostic.entity_id)
-    assert registry.async_get(duplicate.entity_id) is None
-    assert migrated_diagnostic is not None
-    assert migrated_diagnostic.disabled_by is er.RegistryEntryDisabler.INTEGRATION
-    assert registry.async_get(retained.entity_id) is not None
-    assert (entry.version, entry.minor_version) == (3, 0)
+    entries = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    assert len(entries) == 30
+    assert all(item.domain != "camera" for item in entries)
 
 
-async def test_version_two_migration_preserves_config_and_unique_id(
+async def test_diagnostics_redact_all_credentials(
     hass: HomeAssistant,
+    aioclient_mock: Any,
 ) -> None:
-    original_data = _entry_data()
+    aioclient_mock.get(STATE_URL, json=_bridge_payload())
     entry = MockConfigEntry(
         domain=DOMAIN,
-        title="Cradlewise Local",
+        title="Nursery Crib",
         unique_id=CRADLE_ID,
-        data=original_data,
-        version=2,
-        minor_version=1,
+        data={
+            **_bridge_entry_data(),
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "secret",
+        },
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    serialized = str(diagnostics)
+    assert "secret" not in serialized
+    assert "parent@example.com" not in serialized
+    assert "client private key" not in serialized
+    assert diagnostics["coordinator"]["active_provider"] == "local"
+    assert "error" not in diagnostics["coordinator"]["providers"]["local"]
+
+
+async def test_diagnostics_report_an_unloaded_entry(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
     )
     entry.add_to_hass(hass)
 
-    assert await async_migrate_entry(hass, entry)
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
-    assert (
-        entry.unique_id,
-        dict(entry.data),
-        entry.version,
-        entry.minor_version,
-    ) == (CRADLE_ID, original_data, 3, 0)
+    assert diagnostics["coordinator"] == {
+        "loaded": False,
+        "last_update_success": False,
+        "command_available": False,
+        "active_provider": None,
+        "providers": {},
+    }
+
+
+async def test_unload_stops_provider_clients(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    aioclient_mock.get(STATE_URL, json=_bridge_payload())
+    stop = AsyncMock()
+    monkeypatch.setattr(CradlewiseCoordinator, "async_stop", stop)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_bridge_entry_data(),
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert stop.await_count == 1

@@ -1,4 +1,4 @@
-"""Shared entity support for the Cradlewise integration."""
+"""Shared entity support for Cradlewise."""
 
 from __future__ import annotations
 
@@ -41,7 +41,8 @@ def device_info(
     """Build stable device registry information from config and current state."""
     data = coordinator.data if coordinator is not None else None
     software_version = path_value(data, ("device_state", "software_version"))
-    status_url = entry.data.get(CONF_BRIDGE_STATUS_URL)
+    config = {**entry.data, **entry.options}
+    status_url = config.get(CONF_BRIDGE_STATUS_URL)
     return DeviceInfo(
         configuration_url=bridge_base_url(status_url) if status_url else None,
         identifiers={(DOMAIN, entry.data[CONF_CRADLE_ID])},

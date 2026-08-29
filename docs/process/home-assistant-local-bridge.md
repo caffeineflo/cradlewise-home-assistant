@@ -1,7 +1,6 @@
-# Home Assistant Local Bridge
+# Home Assistant and Optional Media Companion
 
-This project intentionally stays separate from existing Cradlewise community
-projects:
+This project complements existing Cradlewise community projects:
 
 - `jlamendo/ha-cradlewise` provides a `cradlewise` Home Assistant custom
   integration for cloud/API state, analytics, sensors, and binary sensors.
@@ -11,32 +10,39 @@ projects:
 - `Cradlewise-Org/cradlewise-api` documents the official read-only REST API
   for Nurture Plus beta tokens.
 
-Our first scope is different: use the local Greengrass MQTT/WebRTC path that
-`stream_local.py` already proves, then expose an ordinary RTSP stream for
-Home Assistant/go2rtc.
+The Home Assistant integration is local-first and does not require a video
+bridge. The optional companion uses the local Greengrass MQTT/WebRTC path that
+`stream_local.py` proves and exposes an ordinary RTSP stream for Home
+Assistant, go2rtc, or Scrypted.
 
 ## Naming
 
-Use `cradlewise_local` for both the Python package and Home Assistant custom
-component domain so users can install it alongside `ha-cradlewise` later.
+Use `cradlewise` for the Home Assistant custom component domain,
+`cradlewise_client` for the media-free Python package, and `cradlewise_local`
+for the optional bridge application. There is no built-in Home Assistant
+integration with the `cradlewise` domain, and the earlier community repository
+using it is not in the default HACS catalog.
 
-## First Runtime Shape
+## Runtime Shape
 
 ```
-Cradlewise crib
+Home Assistant
+  -> cradlewise-client
+  -> local crib MQTT and/or Cradlewise AWS IoT MQTT
+  -> state and controls
+
+Optional media companion
   -> local MQTT/WebRTC over LAN
-  -> cradlewise-local bridge
   -> RTSP audio/video output
   -> MediaMTX
-  -> go2rtc / Home Assistant camera entity
+  -> optional Home Assistant camera entity
 ```
 
-The Home Assistant camera entity only needs an `rtsp://` source. HA can then
-use its normal stream component for HLS, recording, and ffmpeg snapshots.
-
-The bridge also exposes a small HTTP status API. The HA integration polls that
-API for bridge health, local MQTT state, and normalized
-baby/sleep/music/light state from the crib's local shadow.
+Without the companion, Home Assistant talks directly to the local and/or cloud
+MQTT providers and creates no camera entity. With the companion, its HTTP state
+and command API becomes the local provider and its advertised RTSP URL creates
+the camera. This prevents two consumers from competing for the companion's
+local MQTT identity.
 
 ## Bridge Command
 
@@ -172,17 +178,31 @@ Set `CRADLEWISE_STREAM_URL` in that production bridge deployment to the RTSPS
 reader URL. `/info` returns it only to authenticated clients so Home Assistant
 can configure its camera without asking the user for a separate media URL.
 
-Reconfigure the existing Home Assistant config entry with those URLs and
-update the existing Scrypted Rebroadcast/Prebuffer source URL in place. Do not
-delete/re-add the HA entry or Scrypted device; retaining them preserves the
-existing entity, Scrypted, and HomeKit accessory identities.
+Configure this companion through the Cradlewise integration's Configure action
+using its HTTPS API URL. The authenticated `/info` contract supplies the RTSPS
+reader URL. Update an existing Scrypted Rebroadcast/Prebuffer source URL in
+place rather than replacing that Scrypted device or HomeKit accessory.
 
 ## Home Assistant Component
 
 Install the repository through HACS as a custom integration, restart HA, then
-add "Cradlewise" from Devices & Services. Enter only the bridge base URL and
-bearer token. The bridge's authenticated `/info` response supplies the stable
-cradle ID and RTSP(S) reader URL.
+add "Cradlewise" from Devices & Services. Choose Automatic, Local only, or
+Cloud only. Account authentication discovers the paired crib and provisions
+the mTLS device identity used by both local and AWS IoT MQTT.
+
+Local-only setup discards the email and password after provisioning. Automatic
+and cloud-only modes retain them in the config entry for REST fallback and AWS
+credential renewal. Diagnostics redact the account, broker address, device ID,
+certificate material, companion URL, stream URL, and bearer token.
+
+Cloud only governs state and controls, not the independent media choice. A
+configured companion camera remains available, but the integration ignores
+companion state and does not route commands through it in Cloud only mode. It
+polls only authenticated `/health` for camera availability.
+
+Add or remove video through the integration's Configure action. The companion
+URL is optional and its `/info` response supplies the stable cradle ID and
+RTSP(S) reader URL. The integration rejects a companion for another cradle.
 
 If using Home Assistant's YAML `ffmpeg` camera platform directly, force RTSP
 over TCP. The default UDP pull produced intermittent `camera_proxy` 500s during
@@ -190,27 +210,25 @@ smoke testing:
 
 ```yaml
 - platform: ffmpeg
-  name: Cradlewise Local
+  name: Cradlewise Camera
   input: -rtsp_transport tcp -i rtsps://cradlewise-reader:<password>@cradlewise-rtsp.example.com:443/cradlewise
 ```
 
-The custom component gives HA a normal camera entity through `stream_source()`
-and reads non-camera state from the bridge `/state` endpoint. Configure the
-same bearer token in the bridge and config entry. Remote API requests require
-`Authorization: Bearer <token>`. Commands are disabled when no token is
-configured.
+The optional camera uses HA's normal `stream_source()` path. Remote companion
+requests require `Authorization: Bearer <token>`. The camera sends the bearer
+token to the snapshot endpoint only when it has the same origin as the
+configured companion URL.
 
-The config flow validates the HTTP URL, bearer access, bridge API version,
-discovered cradle ID, and advertised RTSP(S) URL. Reconfigure an existing entry
-through Devices & Services when changing credentials or URLs; do not edit Home
-Assistant storage files. The camera sends the bearer token to the snapshot
-endpoint only when it has the same origin as the configured bridge URL.
+Use Reconfigure to change connection mode, account credentials, or the local
+crib address without replacing the config entry. A changed local address is
+accepted only after the broker certificate chain and IP SAN are validated and
+the Greengrass CA is pinned. Do not edit Home Assistant storage files.
 
 ### Entity Surface
 
-With a bridge configured, a fresh install creates 113 entities: 35 enabled and
-78 disabled by default. The default surface is intentionally limited to the
-entities that are useful for dashboards and automations:
+Without media, a fresh install creates 30 entities. Adding the companion adds
+only the camera, for 31 total. The default surface is limited to useful
+dashboards, alerts, and common controls:
 
 - 10 binary sensors: baby present, baby needs attention/help, crib helping,
   light on, loud sound, lower breath-rate alert, obstruction, ineffective
@@ -221,35 +239,30 @@ entities that are useful for dashboards and automations:
   music volume
 - 3 selects: bounce mode, music mode, and music duration
 - 3 switches: actuator, music, and adaptive soothing
-- 1 camera
+- 1 optional camera
 
-The 78 disabled entities hold advanced configuration or detailed diagnostics,
-including MQTT/WebRTC state, raw sleep classifications, WiFi details,
-calibration and firmware state, recipe settings, sound synthesizer details,
-and less common crib controls. Enable one deliberately from the entity
-registry when it serves a real dashboard or automation. The read-only firmware
-update entity reports installed/offered versions but cannot install firmware.
-
-The version 2.1 config-entry migration removed matching entries from a set
-of 112 obsolete duplicate or wrong-domain entity keys and disables the 78
-advanced entities. It keys the migration by integration unique ID, not by a
-user-editable entity ID, so retained entity identities remain stable.
-Version 3 simplifies onboarding by discovering bridge details without changing
-those retained identities.
+State source and state update time are disabled by default. Raw shadow
+documents, calibration internals, upload privacy flags, debug controls, recipe
+internals, firmware actions, and duplicate cross-domain values are not created
+at all.
 
 ### Control Contract
 
 Writable entities publish desired-shadow fragments matching the shapes and
 value sets found in the decompiled Android app. Discrete values are selects:
-music duration is Off, 60, or 180 minutes; responsivity is 2, 4, 6, 8, or 10;
-recipe levels are Off, Gentle, or Level 1 through Level 4; and recipe lock
-duration is 10, 20, or 30 minutes.
+music duration is Off, 60, or 180 minutes, while bounce and music mode are Auto
+or Manual.
 
 Bounce amplitude, bounce duration, and music volume also honor the current
 limits reported by the crib. Music play/volume commands include the complete
 current `soundSynth` object required by the APK contract instead of publishing
 a destructive partial replacement. All controls become unavailable when the
-device state is stale or the local MQTT publisher is disconnected.
+device state is stale or no selected command provider is connected.
+
+Automatic mode selects one publisher for each command: a connected local
+provider first, then AWS IoT. It never retries an ambiguous command through a
+second provider after publication, because a timeout does not prove that the
+crib failed to apply the first update.
 
 A successful command response means the desired update was validated and
 queued for MQTT publication. It does not claim the physical crib already
@@ -334,7 +347,7 @@ state into `/state`; cloud data is only a fallback.
 
 ## Later Layers
 
-- Add analytics entities for daily sleep/awake/nap/soothe metrics.
-- Package certificate provisioning and bridge deployment as a guided install.
+- Add capability-driven official Data API analytics for users who opt in.
+- Package the optional media companion as a guided Home Assistant App install.
 - Add retention settings only if the fixed 14-day policy needs to become
   user-configurable.
