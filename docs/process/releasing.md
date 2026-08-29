@@ -6,12 +6,13 @@ PyPI and making the HACS repository public are external, irreversible actions.
 
 ## One-time setup
 
-1. Make `caffeineflo/cradlewise-local` public and keep GitHub Issues enabled.
+1. Make `caffeineflo/cradlewise-home-assistant` public and keep GitHub Issues
+   enabled.
    Confirm that GitHub's REST API reports a non-empty description, at least one
    repository topic, `archived: false`, and the root license as SPDX `MIT`.
 2. Create a PyPI Trusted Publisher for project `cradlewise-client`:
    - Owner: `caffeineflo`
-   - Repository: `cradlewise-local`
+   - Repository: `cradlewise-home-assistant`
    - Workflow: `tests.yml`
    - Environment: `pypi`
 3. Create a protected GitHub Actions environment named `pypi` and require

@@ -44,6 +44,12 @@ def test_manifest_is_a_hacs_compatible_device_integration() -> None:
     assert manifest["dependencies"] == []
     assert manifest["after_dependencies"] == ["ffmpeg", "stream"]
     assert manifest["requirements"] == ["cradlewise-client==0.1.0"]
+    assert manifest["documentation"] == (
+        "https://github.com/caffeineflo/cradlewise-home-assistant"
+    )
+    assert manifest["issue_tracker"] == (
+        "https://github.com/caffeineflo/cradlewise-home-assistant/issues"
+    )
     assert manifest["version"]
     assert manifest["codeowners"] == ["@caffeineflo"]
 
