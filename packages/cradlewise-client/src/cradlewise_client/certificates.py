@@ -33,6 +33,7 @@ def fetch_server_chain(
 ) -> list[bytes]:
     """Fetch the untrusted broker chain using the provisioned client identity."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     context.load_cert_chain(client_certificate_path, client_private_key_path)

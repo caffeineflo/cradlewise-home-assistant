@@ -85,6 +85,20 @@ DISCOVERY_BROADCASTS_PER_ATTEMPT = 5
 DISCOVERY_MAX_ATTEMPTS = 3
 
 
+def _discovery_bind_address():
+    """Return the LAN address selected for limited broadcast traffic."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_probe:
+            route_probe.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            route_probe.connect(("255.255.255.255", DISCOVERY_UDP_PORT))
+            address = route_probe.getsockname()[0]
+    except OSError as exc:
+        raise RuntimeError(f"Could not determine discovery interface: {exc}") from exc
+    if address == "0.0.0.0":
+        raise RuntimeError("Discovery routing selected an unspecified interface")
+    return address
+
+
 def discover_crib(cradle_id=None):
     """Discover crib IP via the Cradlewise UDP broadcast protocol.
 
@@ -94,6 +108,7 @@ def discover_crib(cradle_id=None):
 
     Returns (ip, cradle_id) on success, raises RuntimeError on failure.
     """
+    bind_address = _discovery_bind_address()
     for attempt in range(1, DISCOVERY_MAX_ATTEMPTS + 1):
         log.info("Discovery attempt %d/%d...", attempt, DISCOVERY_MAX_ATTEMPTS)
 
@@ -101,7 +116,7 @@ def discover_crib(cradle_id=None):
         tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         tcp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         tcp_port = random.randint(10000, 60000)
-        tcp_server.bind(("0.0.0.0", tcp_port))
+        tcp_server.bind((bind_address, tcp_port))
         tcp_server.listen(1)
         tcp_server.settimeout(DISCOVERY_TCP_TIMEOUT_S)
 
