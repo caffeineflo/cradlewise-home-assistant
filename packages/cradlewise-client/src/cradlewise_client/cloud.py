@@ -365,13 +365,16 @@ class CloudAccountClient:
             body=body,
             headers=headers,
         )
-        return self._session.request(
-            method,
-            url,
-            headers=signed_headers,
-            data=body,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
+        try:
+            return self._session.request(
+                method,
+                url,
+                headers=signed_headers,
+                data=body,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except requests.RequestException as exc:
+            raise CloudApiError("Cradlewise cloud request failed") from exc
 
     def _require_credentials(self) -> Credentials:
         if self._credentials is None:

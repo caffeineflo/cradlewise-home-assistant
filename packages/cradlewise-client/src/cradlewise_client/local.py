@@ -142,7 +142,7 @@ class LocalCradleClient:
         return self._mqtt is not None
 
     async def async_start(self, timeout: float = 10) -> None:
-        """Connect and wait for the broker's CONNACK."""
+        """Connect and wait until the state subscription is ready."""
         if self._mqtt is not None:
             raise LocalConnectionError("local MQTT client is already started")
 
@@ -238,7 +238,6 @@ class LocalCradleClient:
             )
             return
 
-        self._dispatch_connected()
         result, mid = client.subscribe(
             [
                 (self.beacon_topic, 0),
@@ -293,6 +292,8 @@ class LocalCradleClient:
                     f"local MQTT shadow request failed with rc={result.rc}"
                 )
             )
+            return
+        self._dispatch_connected()
 
     def _on_message(self, client, userdata, message) -> None:
         topic = message.topic
@@ -355,6 +356,7 @@ class LocalCradleClient:
             self._connected_future.set_exception(error)
             return
         _LOGGER.error("Local Cradlewise MQTT error: %s", error)
+        asyncio.create_task(self.async_stop())
 
     def _set_connected(self, connected: bool) -> None:
         if self._connected == connected:

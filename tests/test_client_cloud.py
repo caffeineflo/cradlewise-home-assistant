@@ -87,6 +87,34 @@ def test_cloud_request_reauthenticates_once_on_forbidden(monkeypatch):
     assert (state, len(auth_calls)) == ({"babyPresent": True}, 1)
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        cloud.requests.ConnectionError("offline"),
+        cloud.requests.Timeout("timed out"),
+    ],
+)
+def test_cloud_request_reports_transport_failures_as_cloud_api_errors(
+    monkeypatch,
+    error,
+):
+    class FailingSession:
+        def request(self, method, url, headers, data, timeout):
+            raise error
+
+    client = _authenticated(
+        CloudAccountClient(
+            email="user@example.com",
+            password="secret",
+            session=FailingSession(),
+        )
+    )
+    monkeypatch.setattr(cloud, "sign_request", lambda *args, **kwargs: {})
+
+    with pytest.raises(cloud.CloudApiError, match="request failed"):
+        client.get_cradle_state("crib-1")
+
+
 def test_get_cradle_ip_prefers_v2_state_message(monkeypatch):
     session = FakeSession(
         [

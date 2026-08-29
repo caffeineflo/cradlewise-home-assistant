@@ -30,6 +30,8 @@ class FakeMqttClient:
         self.on_disconnect = None
         self.on_message = None
         self.on_subscribe = None
+        self.subscribe_reason_codes = [0] * 6
+        self.publish_result = MQTT_ERR_SUCCESS
 
     def tls_set(self, **kwargs):
         self.tls_options = kwargs
@@ -48,6 +50,7 @@ class FakeMqttClient:
 
     def loop_start(self):
         self.loop_started = True
+        self.on_subscribe(self, None, 7, self.subscribe_reason_codes, None)
 
     def loop_stop(self):
         self.loop_stopped = True
@@ -62,7 +65,7 @@ class FakeMqttClient:
 
     def publish(self, topic, payload, qos=0, retain=False):
         self.published.append((topic, payload, qos, retain))
-        return SimpleNamespace(rc=MQTT_ERR_SUCCESS)
+        return SimpleNamespace(rc=self.publish_result)
 
 
 @pytest.fixture
@@ -138,12 +141,52 @@ async def test_subscription_ack_requests_current_shadow(client_parts):
     client, mqtt_client, _updates, _connection_states = client_parts
     await client.async_start()
 
-    mqtt_client.on_subscribe(mqtt_client, None, 7, [0] * 6, None)
-
     assert mqtt_client.published == [
         ("$aws/things/cradle-1/shadow/get", "{}", 0, False)
     ]
     await client.async_stop()
+
+
+@pytest.mark.parametrize(
+    ("reason_codes", "publish_result", "message"),
+    [
+        ([128] * 6, MQTT_ERR_SUCCESS, "subscription was rejected"),
+        ([0] * 6, 1, "shadow request failed"),
+    ],
+)
+async def test_start_cleans_up_when_state_initialization_fails(
+    client_parts,
+    reason_codes,
+    publish_result,
+    message,
+):
+    client, mqtt_client, _updates, _connection_states = client_parts
+    mqtt_client.subscribe_reason_codes = reason_codes
+    mqtt_client.publish_result = publish_result
+
+    with pytest.raises(LocalConnectionError, match=message):
+        await client.async_start()
+
+    assert client.started is False
+
+
+async def test_runtime_subscription_failure_stops_client_for_retry(client_parts):
+    client, mqtt_client, _updates, _connection_states = client_parts
+    await client.async_start()
+    stopped = asyncio.Event()
+    original_stop = client.async_stop
+
+    async def stop_and_signal():
+        await original_stop()
+        stopped.set()
+
+    client.async_stop = stop_and_signal
+    mqtt_client.on_connect(mqtt_client, None, {}, 0, None)
+    mqtt_client.on_subscribe(mqtt_client, None, 7, [128] * 6, None)
+
+    await asyncio.wait_for(stopped.wait(), timeout=1)
+
+    assert client.started is False
 
 
 async def test_state_message_is_dispatched_on_event_loop(client_parts):
@@ -167,6 +210,7 @@ async def test_state_message_is_dispatched_on_event_loop(client_parts):
 async def test_publish_shadow_does_not_retry_command(client_parts):
     client, mqtt_client, _updates, _connection_states = client_parts
     await client.async_start()
+    mqtt_client.published.clear()
     payload = {"state": {"desired": {"bounceLevel": 2}}}
 
     client.publish_shadow(payload)
