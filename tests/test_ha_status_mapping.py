@@ -3,12 +3,9 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-INTEGRATION_PATH = Path("custom_components/cradlewise_local")
-PACKAGE = "custom_components.cradlewise_local"
+INTEGRATION_PATH = Path("custom_components/cradlewise")
+PACKAGE = "_cradlewise_status_test"
 
-custom_components = ModuleType("custom_components")
-custom_components.__path__ = []
-sys.modules.setdefault("custom_components", custom_components)
 package = ModuleType(PACKAGE)
 package.__path__ = [str(INTEGRATION_PATH)]
 sys.modules[PACKAGE] = package
@@ -23,7 +20,9 @@ def _load_module(name: str, path: Path):
     return module
 
 
-_load_module(f"{PACKAGE}.config_helpers", INTEGRATION_PATH / "config_helpers.py")
+config_helpers = _load_module(
+    f"{PACKAGE}.config_helpers", INTEGRATION_PATH / "config_helpers.py"
+)
 helpers = _load_module(
     f"{PACKAGE}.status_helpers", INTEGRATION_PATH / "status_helpers.py"
 )
@@ -53,6 +52,14 @@ def test_build_command_url_accepts_base_state_or_command_urls():
         helpers.build_command_url("http://bridge:8080/command")
         == "http://bridge:8080/command"
     )
+
+
+def test_health_url_replaces_any_supported_bridge_endpoint():
+    assert {
+        config_helpers.health_url_from_status_url("http://bridge:8080"),
+        config_helpers.health_url_from_status_url("http://bridge:8080/state"),
+        config_helpers.health_url_from_status_url("http://bridge:8080/live"),
+    } == {"http://bridge:8080/health"}
 
 
 def test_path_value_reads_nested_status_values():

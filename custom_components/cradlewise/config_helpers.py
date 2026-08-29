@@ -1,4 +1,4 @@
-"""Pure helpers for Cradlewise config validation."""
+"""Pure configuration helpers for Cradlewise."""
 
 from __future__ import annotations
 
@@ -8,11 +8,15 @@ STATE_ENDPOINT = "state"
 COMMAND_ENDPOINT = "command"
 SNAPSHOT_ENDPOINT = "snapshot.jpg"
 INFO_ENDPOINT = "info"
+HEALTH_ENDPOINT = "health"
+LIVE_ENDPOINT = "live"
 KNOWN_ENDPOINTS = {
     STATE_ENDPOINT,
     COMMAND_ENDPOINT,
     SNAPSHOT_ENDPOINT,
     INFO_ENDPOINT,
+    HEALTH_ENDPOINT,
+    LIVE_ENDPOINT,
 }
 
 
@@ -70,6 +74,11 @@ def command_url_from_status_url(value: str) -> str:
 def info_url_from_status_url(value: str) -> str:
     """Return the bridge information URL for a base or endpoint URL."""
     return _replace_endpoint(value, INFO_ENDPOINT)
+
+
+def health_url_from_status_url(value: str) -> str:
+    """Return the bridge semantic health URL for a base or endpoint URL."""
+    return _replace_endpoint(value, HEALTH_ENDPOINT)
 
 
 def bridge_base_url(value: str) -> str:

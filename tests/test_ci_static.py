@@ -24,6 +24,14 @@ def test_dockerfile_installs_mqtt_ca_pin_console_script():
     assert "test -x /app/.venv/bin/cradlewise-pin-mqtt-ca" in source_stage
 
 
+def test_dockerfile_and_ci_include_the_standalone_client_package():
+    dockerfile = Path("Dockerfile").read_text()
+    workflow = Path(".github/workflows/tests.yml").read_text()
+
+    assert "COPY packages/cradlewise-client" in dockerfile
+    assert "uv build --package cradlewise-client" in workflow
+
+
 def test_bridge_image_includes_inactive_observability_extra():
     dockerfile = Path("Dockerfile").read_text()
     project = Path("pyproject.toml").read_text()
@@ -51,6 +59,17 @@ def test_ci_package_write_permission_is_publish_only():
     publish_job = workflow.split("  bridge-image-publish:", 1)[1]
 
     assert "packages: write" in publish_job
+
+
+def test_client_publish_is_tag_only_test_gated_and_uses_trusted_publishing():
+    workflow = Path(".github/workflows/tests.yml").read_text()
+    publish_job = workflow.split("  client-package-publish:", 1)[1]
+
+    assert "if: startsWith(github.ref, 'refs/tags/v')" in publish_job
+    assert "environment: pypi" in publish_job
+    assert "id-token: write" in publish_job
+    assert "pypa/gh-action-pypi-publish@" in publish_job
+    assert "needs:\n      - test\n      - lint" in publish_job
 
 
 def test_ci_pull_request_build_has_read_only_permissions():

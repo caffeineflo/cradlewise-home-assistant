@@ -11,7 +11,8 @@ it remains behind Home Assistant authentication.
 
 ## Requirements
 
-- `camera.cradlewise_local_2` provides a working stream.
+- The optional Cradlewise media companion is configured and its camera entity
+  provides a working stream.
 - Home Assistant's Stream integration is loaded.
 - **Preload stream** is enabled for the Cradlewise camera entity. Lookback is
   available only while an HLS stream is already active.
@@ -19,8 +20,10 @@ it remains behind Home Assistant authentication.
   automation from the crib's local MQTT shadow.
 - `/media/cradlewise-wake/events` exists and is writable by Home Assistant.
 
-The example uses the entity IDs from the current deployment. Change the camera
-entity ID if another installation assigned a different ID.
+The example uses readable sample entity IDs. Before importing it, replace the
+camera, sleep-state, sleep-phase, baby-present, attention, and help entity IDs
+with those assigned by your Home Assistant instance. Entity IDs are based on
+the crib name chosen in your Cradlewise account and can differ between homes.
 
 ## Install
 
@@ -87,23 +90,23 @@ version so browsers do not keep an old cached copy.
 The example starts a recording only when the baby is present and one of these
 events happens:
 
-- `sensor.cradlewise_local_sleep_phase` changes from `sleep` to `awake`
-- `sensor.cradlewise_local_sleep_phase` changes from `sleep` to `stirring`
-- `sensor.cradlewise_local_sleep_state` changes from `Light sleep` to `Quite Awake`
-- `sensor.cradlewise_local_sleep_state` changes from `Light sleep` to `Active Awake`
-- `sensor.cradlewise_local_sleep_state` changes from `Deep sleep` to `Quite Awake`
-- `sensor.cradlewise_local_sleep_state` changes from `Deep sleep` to `Active Awake`
-- `binary_sensor.cradlewise_local_baby_needs_attention` turns on
-- `binary_sensor.cradlewise_local_baby_needs_help` turns on
+- `sensor.cradlewise_sleep_phase` changes from `sleep` to `awake`
+- `sensor.cradlewise_sleep_phase` changes from `sleep` to `stirring`
+- `sensor.cradlewise_sleep_state` changes from `Light sleep` to `Quite Awake`
+- `sensor.cradlewise_sleep_state` changes from `Light sleep` to `Active Awake`
+- `sensor.cradlewise_sleep_state` changes from `Deep sleep` to `Quite Awake`
+- `sensor.cradlewise_sleep_state` changes from `Deep sleep` to `Active Awake`
+- `binary_sensor.cradlewise_baby_needs_attention` turns on
+- `binary_sensor.cradlewise_baby_needs_help` turns on
 
 The six stable state anchors for this workflow are:
 
-- `binary_sensor.cradlewise_local_baby_present`
-- `binary_sensor.cradlewise_local_baby_needs_attention`
-- `binary_sensor.cradlewise_local_baby_needs_help`
-- `binary_sensor.cradlewise_local_loud_sound_detected`
-- `sensor.cradlewise_local_sleep_phase`
-- `sensor.cradlewise_local_sleep_state`
+- `binary_sensor.cradlewise_baby_present`
+- `binary_sensor.cradlewise_baby_needs_attention`
+- `binary_sensor.cradlewise_baby_needs_help`
+- `binary_sensor.cradlewise_loud_sound_detected`
+- `sensor.cradlewise_sleep_phase`
+- `sensor.cradlewise_sleep_state`
 
 `loud_sound_detected` intentionally remains informational and does not start a
 recording. This preserves the existing trigger behavior and avoids creating a

@@ -1,4 +1,4 @@
-"""Pure helpers for bridge status data."""
+"""Shared validation helpers for Cradlewise entities."""
 
 from __future__ import annotations
 

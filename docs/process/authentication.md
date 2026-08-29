@@ -20,9 +20,6 @@ REST API (SigV4-signed) --> device certificates + config
       |
       v
 S3 download (SigV4) --> client cert + client key PEM files
-      |
-      v
-PUT /devices/{deviceId} --> register device with backend
 ```
 
 ## Step 1: Cognito Authentication
@@ -113,7 +110,7 @@ The legacy Group CA cert from step 4 is saved as `ca.pem`. Newer Greengrass v2
 firmware uses a separate broker core CA; pin it as `server_ca.pem` with
 `cradlewise-pin-mqtt-ca` after provisioning the client credentials.
 
-## Step 6: Register Device
+## Android App Device Telemetry
 
 ```
 PUT /prod-latest/devices/{deviceId}
@@ -127,8 +124,11 @@ Body:
 }
 ```
 
-Without this call, the device appears in the account with no name and an
-epoch-0 timestamp.
+The Android app makes this separate call after provisioning so it can register
+its FCM push token and phone/network metadata. The Home Assistant client does
+not need mobile push notifications and intentionally skips this call. MQTT
+authorization comes from `pairedUsers/v3`, and both local and AWS IoT
+connections have been verified without uploading the extra device telemetry.
 
 ## Certificate Details
 

@@ -10,6 +10,8 @@ from cradlewise_local.status import (
     BridgeStatusStore,
 )
 
+pytestmark = pytest.mark.enable_socket
+
 
 def _free_port() -> int:
     with socket.socket() as sock:

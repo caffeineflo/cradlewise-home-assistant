@@ -1,0 +1,124 @@
+{
+  "title": "Cradlewise",
+  "config": {
+    "abort": {
+      "already_configured": "This Cradlewise crib is already configured",
+      "cannot_connect": "Could not finish Cradlewise setup",
+      "cannot_connect_local": "Cloud setup succeeded, but the crib's local broker could not be verified",
+      "cannot_find_device": "The crib did not report a local network address",
+      "invalid_auth": "Cradlewise rejected the account credentials",
+      "reauth_successful": "Cradlewise account reconnected",
+      "reconfigure_successful": "Cradlewise configuration updated"
+    },
+    "error": {
+      "cannot_connect": "Could not connect to Cradlewise",
+      "invalid_auth": "Cradlewise rejected the account credentials",
+      "invalid_cradle": "Select a paired Cradlewise crib",
+      "invalid_connection_mode": "Select a supported connection mode",
+      "no_cradles": "No paired Cradlewise crib was found",
+      "wrong_cradle": "This account does not contain the configured crib",
+      "cannot_connect_local": "The local crib broker could not be verified",
+      "cannot_find_device": "Enter the crib's local network address"
+    },
+    "step": {
+      "user": {
+        "title": "Add Cradlewise",
+        "description": "Choose how Home Assistant should reach your crib. Automatic prefers your local network and falls back to Cradlewise cloud.",
+        "data": {"connection_mode": "Connection mode"}
+      },
+      "account": {
+        "title": "Cradlewise account",
+        "description": "Your account is used to discover the crib and provision its device certificate. Local-only setup does not retain these credentials.",
+        "data": {"email": "Email", "password": "Password"}
+      },
+      "select_cradle": {"title": "Choose a crib", "data": {"cradle_id": "Crib"}},
+      "reconfigure": {
+        "title": "Reconfigure Cradlewise",
+        "description": "Change connection mode or local address without replacing the crib or its entities. Leave the password blank to keep it. Automatic can discover a blank local address. Any mode with local access revalidates the broker and trusts its current core CA.",
+        "data": {
+          "connection_mode": "Connection mode",
+          "email": "Email",
+          "password": "Password",
+          "local_host": "Local crib address"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Cradlewise account",
+        "data": {"email": "Email", "password": "Password"}
+      }
+    }
+  },
+  "options": {
+    "error": {
+      "cannot_connect": "Could not connect to the media companion",
+      "invalid_auth": "The media companion rejected the bearer token",
+      "invalid_bridge_response": "The media companion returned an invalid response",
+      "invalid_bridge_status_url": "Use an http:// or https:// media companion URL",
+      "unsupported_bridge": "Update the media companion before connecting it",
+      "wrong_cradle": "The media companion belongs to a different crib"
+    },
+    "step": {
+      "init": {
+        "title": "Optional media companion",
+        "description": "Add the separate media companion for live video, or leave the URL blank to use Home Assistant without video.",
+        "data": {"bridge_status_url": "Media companion URL", "bearer_token": "Bearer token"},
+        "data_description": {
+          "bridge_status_url": "The HTTP or HTTPS base address of the companion.",
+          "bearer_token": "Leave blank to keep the stored token."
+        }
+      }
+    }
+  },
+  "selector": {
+    "connection_mode": {
+      "options": {
+        "automatic": "Automatic (local first, cloud fallback)",
+        "local": "Local only",
+        "cloud": "Cloud only"
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connectivity": {"name": "Connectivity"},
+      "baby_present": {"name": "Baby present"},
+      "baby_needs_attention": {"name": "Baby needs attention"},
+      "baby_needs_help": {"name": "Baby needs help"},
+      "crib_helping": {"name": "Crib helping"},
+      "light_on": {"name": "Light"},
+      "loud_sound_detected": {"name": "Loud sound detected"},
+      "rocking_not_effective": {"name": "Rocking not effective"},
+      "obstruction_detected": {"name": "Obstruction detected"},
+      "lower_breath_rate_alert": {"name": "Lower breath rate alert"}
+    },
+    "camera": {"camera": {"name": "Camera"}},
+    "number": {
+      "bounce_level": {"name": "Bounce level"},
+      "music_level": {"name": "Music level"},
+      "bounce_amplitude": {"name": "Bounce amplitude"},
+      "bounce_duration": {"name": "Bounce duration"},
+      "music_volume": {"name": "Music volume"}
+    },
+    "select": {
+      "bounce_mode": {"name": "Bounce mode"},
+      "music_mode": {"name": "Music mode"},
+      "music_duration": {"name": "Music duration"}
+    },
+    "sensor": {
+      "device_state_source": {"name": "State source"},
+      "device_state_updated_at": {"name": "State updated at"},
+      "sleep_state": {"name": "Sleep state"},
+      "sleep_phase": {"name": "Sleep phase"},
+      "bounce_time_remaining": {"name": "Bounce time remaining"},
+      "music_mood": {"name": "Music mood"},
+      "music_time_remaining": {"name": "Music time remaining"},
+      "ambient_temperature": {"name": "Ambient temperature"},
+      "breath_rate": {"name": "Breath rate"}
+    },
+    "switch": {
+      "actuator_on": {"name": "Bounce"},
+      "music_playing": {"name": "Music"},
+      "adaptive_soothing_enabled": {"name": "Adaptive soothing"}
+    }
+  }
+}

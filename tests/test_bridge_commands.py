@@ -15,6 +15,8 @@ from cradlewise_local.commands import (
 )
 from cradlewise_local.status import BridgeStatusHttpServer, BridgeStatusStore
 
+pytestmark = pytest.mark.enable_socket
+
 
 def _free_port() -> int:
     with socket.socket() as sock:

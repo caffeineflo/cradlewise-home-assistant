@@ -18,7 +18,7 @@ uv run --frozen --extra test ruff check .
 uv run --frozen --extra test ruff format --check .
 ```
 
-Changes to the Home Assistant integration must keep the `cradlewise_local`
+Changes to the Home Assistant integration must keep the `cradlewise`
 domain and existing unique IDs stable. Include behavior-focused tests for new
 bridge payloads, API normalization, config flow behavior, or entities.
 
