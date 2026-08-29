@@ -20,6 +20,9 @@ from pycognito import Cognito
 # Cradlewise Amplify configuration (from amplifyconfiguration.json in the APK)
 USER_POOL_ID = "us-east-1_hRGLsOxun"
 CLIENT_ID = "4jnn2bbtroa3e6ra73dc8m8luh"
+# Public native-app configuration embedded in the distributed Android APK.
+# This is not an account credential and cannot be kept confidential by a
+# mobile client.
 CLIENT_SECRET = "qfmc9tv70upcacajmhpl4a9n3orehteo93icbng0fljkt6916em"
 IDENTITY_POOL_ID = "us-east-1:53b70db5-7440-4ecf-8dac-d6202eb6c1d2"
 REGION = "us-east-1"

@@ -18,3 +18,8 @@ and private hostnames from logs before attaching them.
 If a secret may have been exposed, rotate it immediately. This includes the
 bridge bearer token, RTSP credentials, Cradlewise account password, official
 Data API token, and device certificate material.
+
+The Cognito mobile-client configuration in this repository is public
+configuration extracted from the distributed Android application. It is not a
+user credential. Reports should still identify any path that allows it to be
+used without the user's own authentication or authorization.

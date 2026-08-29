@@ -165,7 +165,7 @@ JanusClientConfigReceived
 | URL | Purpose |
 |-----|---------|
 | `https://www.youtube.com/watch?v=weInpoCMVLg` | Product content |
-| YouTube API Key: `[redacted]` | |
+| YouTube API Key: present in the APK; value intentionally redacted | |
 
 ## Android Permissions
 

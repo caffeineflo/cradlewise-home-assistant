@@ -158,7 +158,7 @@ def test_provisioning_classifies_certificate_objects(monkeypatch):
         CloudAccountClient(email="user@example.com", password="secret", session=session)
     )
     objects = {
-        "crib/key.pem": b"TEST PRIVATE KEY MATERIAL\nkey",
+        "crib/key.pem": b"TEST PRIVATE KEY MATERIAL",
         "crib/cert.pem": b"-----BEGIN CERTIFICATE-----\ncert",
     }
     s3 = SimpleNamespace(
@@ -179,7 +179,7 @@ def test_provisioning_classifies_certificate_objects(monkeypatch):
         credentials.client_certificate,
     ) == (
         "device-1",
-        "TEST PRIVATE KEY MATERIAL\nkey",
+        "TEST PRIVATE KEY MATERIAL",
         "-----BEGIN CERTIFICATE-----\ncert",
     )
 
