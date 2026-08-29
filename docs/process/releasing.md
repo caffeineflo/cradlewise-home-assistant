@@ -13,7 +13,7 @@ PyPI and making the HACS repository public are external, irreversible actions.
 2. Create a PyPI Trusted Publisher for project `cradlewise-client`:
    - Owner: `caffeineflo`
    - Repository: `cradlewise-home-assistant`
-   - Workflow: `tests.yml`
+   - Workflow: `release.yml`
    - Environment: `pypi`
 3. Create a protected GitHub Actions environment named `pypi` and require
    approval before deployment.
@@ -37,15 +37,18 @@ OIDC publishing identity only after the environment is approved.
    Local only, Cloud only, reauthentication, reconfiguration, unload/reload,
    and optional media behavior.
 5. Merge to `main` only after CI passes.
-6. Push the `vX.Y.Z` tag. The tag CI must pass before the protected `pypi`
-   environment is approved.
-7. After PyPI contains the client package and tag CI is green, create the full
-   GitHub release from that tag.
+6. Push the `vX.Y.Z` tag. The release workflow must pass its unprivileged test,
+   validation, and build jobs before the protected `pypi` environment is
+   approved.
+7. Approve the `pypi` deployment after reviewing the built distribution. The
+   workflow publishes the client, publishes the versioned bridge image, and
+   creates the full GitHub release only after both publications succeed.
 
-The tag triggers the client publish job only after the test, lint, Home
-Assistant, and validation jobs pass. Its tag guard rejects a tag that does not
-match the client package version. After PyPI shows the new client version,
-confirm that a clean HACS install can resolve the integration requirement.
+The privileged PyPI job only downloads and publishes the artifact produced by
+the unprivileged build job. The release guard rejects a tag unless it matches
+the client package version, integration version, and pinned integration
+requirement. After PyPI shows the new client version, confirm that a clean HACS
+install can resolve the integration requirement.
 
 ## HACS default catalog
 

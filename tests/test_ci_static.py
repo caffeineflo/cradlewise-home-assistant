@@ -48,8 +48,10 @@ def test_ci_builds_and_publishes_bridge_image():
 
 
 def test_ci_actions_are_pinned_to_full_commit_shas():
-    workflow = Path(".github/workflows/tests.yml").read_text()
-    action_references = re.findall(r"uses: [^\s]+@([^\s]+)", workflow)
+    workflows = "\n".join(
+        path.read_text() for path in Path(".github/workflows").glob("*.yml")
+    )
+    action_references = re.findall(r"uses: [^\s]+@([^\s]+)", workflows)
 
     assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in action_references)
 
@@ -61,15 +63,42 @@ def test_ci_package_write_permission_is_publish_only():
     assert "packages: write" in publish_job
 
 
-def test_client_publish_is_tag_only_test_gated_and_uses_trusted_publishing():
-    workflow = Path(".github/workflows/tests.yml").read_text()
-    publish_job = workflow.split("  client-package-publish:", 1)[1]
+def test_client_publish_uses_trusted_publishing_without_repository_checkout():
+    workflow = Path(".github/workflows/release.yml").read_text()
+    publish_job = workflow.split("  client-package-publish:", 1)[1].split(
+        "  bridge-image-publish:", 1
+    )[0]
 
-    assert "if: startsWith(github.ref, 'refs/tags/v')" in publish_job
-    assert "environment: pypi" in publish_job
-    assert "id-token: write" in publish_job
-    assert "pypa/gh-action-pypi-publish@" in publish_job
-    assert "needs:\n      - test\n      - lint" in publish_job
+    assert (
+        "environment: pypi" in publish_job
+        and "id-token: write" in publish_job
+        and "pypa/gh-action-pypi-publish@" in publish_job
+        and "actions/checkout@" not in publish_job
+    )
+
+
+def test_client_release_build_is_test_gated_without_oidc_permission():
+    workflow = Path(".github/workflows/release.yml").read_text()
+    build_job = workflow.split("  client-package-build:", 1)[1].split(
+        "  client-package-publish:", 1
+    )[0]
+
+    assert (
+        "needs:\n      - test\n      - lint" in build_job
+        and "actions/upload-artifact@" in build_job
+        and "id-token: write" not in build_job
+    )
+
+
+def test_release_workflow_is_tag_only_and_creates_full_github_release():
+    workflow = Path(".github/workflows/release.yml").read_text()
+
+    assert (
+        'tags:\n      - "v*"' in workflow
+        and "gh release create" in workflow
+        and "client-package-publish" in workflow
+        and "bridge-image-publish" in workflow
+    )
 
 
 def test_ci_pull_request_build_has_read_only_permissions():

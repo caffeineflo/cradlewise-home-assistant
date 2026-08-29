@@ -1,10 +1,16 @@
-name: CI
+name: Release
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 env:
   BRIDGE_IMAGE: ghcr.io/caffeineflo/cradlewise-local-bridge
@@ -12,8 +18,6 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -44,8 +48,6 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
 
     steps:
       - name: Check out repository
@@ -73,8 +75,6 @@ jobs:
 
   home-assistant-test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
 
     steps:
       - name: Check out repository
@@ -95,52 +95,83 @@ jobs:
 
   home-assistant-validation:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
 
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
 
       - name: Run hassfest
-        uses: home-assistant/actions/hassfest@f4ca6f671bd429efb108c0f2fa0ae8af0215986c  # master
+        uses: home-assistant/actions/hassfest@a7c616ce81ccda50150bf1595786c71b1883fabb  # master
 
       - name: Run HACS validation
-        if: github.event.repository.private == false
         uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa  # main
         with:
           category: integration
           comment: false
 
-  bridge-image-check:
-    if: github.event_name == 'pull_request'
+  client-package-build:
     runs-on: ubuntu-latest
     needs:
       - test
       - lint
       - home-assistant-test
       - home-assistant-validation
-    permissions:
-      contents: read
 
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7
 
-      - name: Build bridge image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
-          context: .
-          platforms: linux/amd64
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          python-version: "3.12"
+
+      - name: Verify release versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_version="${GITHUB_REF_NAME#v}"
+          client_version=$(uv version --package cradlewise-client --short)
+          integration_version=$(python -c 'import json; print(json.load(open("custom_components/cradlewise/manifest.json"))["version"])')
+          integration_requirement=$(python -c 'import json; print(json.load(open("custom_components/cradlewise/manifest.json"))["requirements"][0])')
+          test "$client_version" = "$expected_version"
+          test "$integration_version" = "$expected_version"
+          test "$integration_requirement" = "cradlewise-client==$expected_version"
+
+      - name: Build client distribution
+        run: uv build --package cradlewise-client
+
+      - name: Upload client distribution
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: cradlewise-client-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  client-package-publish:
+    runs-on: ubuntu-latest
+    needs: client-package-build
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download client distribution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: cradlewise-client-dist
+          path: dist/
+
+      - name: Publish client distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+        with:
+          packages-dir: dist/
 
   bridge-image-publish:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     needs:
       - test
@@ -171,12 +202,10 @@ jobs:
         with:
           images: ${{ env.BRIDGE_IMAGE }}
           tags: |
-            type=ref,event=branch
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and publish bridge image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7
@@ -188,3 +217,28 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  github-release:
+    runs-on: ubuntu-latest
+    needs:
+      - client-package-publish
+      - bridge-image-publish
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download client distribution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: cradlewise-client-dist
+          path: dist/
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --repo "$GITHUB_REPOSITORY"
+          --verify-tag
+          --generate-notes
+          --title "$GITHUB_REF_NAME"
