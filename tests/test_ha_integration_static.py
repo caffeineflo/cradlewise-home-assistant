@@ -137,4 +137,4 @@ def test_brand_asset_is_present() -> None:
 def test_hacs_manifest_matches_the_tested_home_assistant_baseline() -> None:
     hacs = json.loads(Path("hacs.json").read_text(encoding="utf-8"))
 
-    assert hacs == {"name": "Cradlewise", "homeassistant": "2026.7.0"}
+    assert hacs == {"name": "Cradlewise", "homeassistant": "2026.8.0"}

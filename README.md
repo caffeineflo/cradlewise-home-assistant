@@ -283,15 +283,16 @@ privacy guarantees, and monitor examples.
 
 ## Published Bridge Image
 
-CI builds and publishes the bridge image to GitHub Container Registry:
+The release workflow publishes the optional bridge image to GitHub Container
+Registry:
 
 ```text
 ghcr.io/caffeineflo/cradlewise-local-bridge
 ```
 
-Published tags include `main`, `latest`, the short git SHA, and release tags
-such as `v0.1.0`. For a server deployment, prefer pulling a published tag and
-recreating the bridge container deliberately rather than auto-deploying from CI.
+Published tags include the release tag, its semantic version aliases, and the
+short git SHA. For a server deployment, pull a published release version and
+recreate the bridge container deliberately rather than auto-deploying from CI.
 The example Compose file uses `CRADLEWISE_BRIDGE_VERSION=0.1.0`; that tag and
 the GHCR package must be public as part of the first release.
 

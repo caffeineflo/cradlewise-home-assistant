@@ -1,4 +1,6 @@
 import ipaddress
+import socket
+import ssl
 import stat
 from datetime import datetime, timedelta, timezone
 
@@ -6,6 +8,7 @@ import pytest
 from cradlewise_client.certificates import (
     BrokerCertificateError,
     _unverified_chain,
+    fetch_server_chain,
     materialize_credentials,
     validate_server_chain,
 )
@@ -70,6 +73,30 @@ def test_validate_server_chain_accepts_der_from_python_ssl():
 def test_validate_server_chain_rejects_wrong_host():
     with pytest.raises(BrokerCertificateError, match="not valid for"):
         validate_server_chain(_chain(), "192.0.2.11")
+
+
+def test_fetch_server_chain_requires_tls_1_2_or_newer(monkeypatch, tmp_path):
+    class Context:
+        check_hostname = True
+        verify_mode = ssl.CERT_REQUIRED
+        minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+
+        @staticmethod
+        def load_cert_chain(_certificate, _private_key):
+            return None
+
+    context = Context()
+
+    def fail_connection(*_args, **_kwargs):
+        raise OSError("offline")
+
+    monkeypatch.setattr(ssl, "SSLContext", lambda _protocol: context)
+    monkeypatch.setattr(socket, "create_connection", fail_connection)
+
+    with pytest.raises(BrokerCertificateError, match="could not inspect"):
+        fetch_server_chain("192.0.2.10", tmp_path / "cert", tmp_path / "key")
+
+    assert context.minimum_version is ssl.TLSVersion.TLSv1_2
 
 
 def test_materialize_credentials_prefers_pinned_server_ca(tmp_path):

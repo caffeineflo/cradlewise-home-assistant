@@ -41,10 +41,10 @@ def test_bridge_image_includes_inactive_observability_extra():
     )
 
 
-def test_ci_builds_and_publishes_bridge_image():
+def test_ci_builds_bridge_image_without_publishing():
     workflow = Path(".github/workflows/tests.yml").read_text()
 
-    assert "ghcr.io/caffeineflo/cradlewise-local-bridge" in workflow
+    assert "docker/build-push-action@" in workflow and "push: false" in workflow
 
 
 def test_ci_actions_are_pinned_to_full_commit_shas():
@@ -56,11 +56,17 @@ def test_ci_actions_are_pinned_to_full_commit_shas():
     assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in action_references)
 
 
-def test_ci_package_write_permission_is_publish_only():
-    workflow = Path(".github/workflows/tests.yml").read_text()
-    publish_job = workflow.split("  bridge-image-publish:", 1)[1]
+def test_release_package_write_permission_is_bridge_publish_only():
+    workflow = Path(".github/workflows/release.yml").read_text()
+    publish_job = workflow.split("  bridge-image-publish:", 1)[1].split(
+        "  github-release:", 1
+    )[0]
 
-    assert "packages: write" in publish_job
+    assert (
+        "packages: write" in publish_job
+        and "ghcr.io/caffeineflo/cradlewise-local-bridge" in workflow
+        and "push: true" in publish_job
+    )
 
 
 def test_client_publish_uses_trusted_publishing_without_repository_checkout():
@@ -103,9 +109,7 @@ def test_release_workflow_is_tag_only_and_creates_full_github_release():
 
 def test_ci_pull_request_build_has_read_only_permissions():
     workflow = Path(".github/workflows/tests.yml").read_text()
-    check_job = workflow.split("  bridge-image-check:", 1)[1].split(
-        "  bridge-image-publish:", 1
-    )[0]
+    check_job = workflow.split("  bridge-image-check:", 1)[1]
 
     assert "packages: write" not in check_job
 

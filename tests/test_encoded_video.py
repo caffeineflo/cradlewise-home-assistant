@@ -18,7 +18,7 @@ from cradlewise_local.encoded import (
 )
 from cradlewise_local.status import BridgeStatusStore
 from cradlewise_local.streamer import BridgeStreamer
-from stream_local import CribStreamer, discover_crib_race
+from stream_local import CribStreamer, _discovery_bind_address, discover_crib_race
 
 
 def test_h264_nal_types_reads_three_and_four_byte_start_codes():
@@ -137,6 +137,31 @@ def test_service_discovery_does_not_start_interactive_cloud_login(monkeypatch):
 
     assert result == "192.0.2.10"
     assert cloud_called is False
+
+
+def test_discovery_callback_binds_to_the_outbound_lan_interface(monkeypatch):
+    class RouteProbe:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        @staticmethod
+        def setsockopt(*_args):
+            return None
+
+        @staticmethod
+        def connect(_address):
+            return None
+
+        @staticmethod
+        def getsockname():
+            return "192.0.2.25", 54321
+
+    monkeypatch.setattr("stream_local.socket.socket", lambda *_args: RouteProbe())
+
+    assert _discovery_bind_address() == "192.0.2.25"
 
 
 def test_discovery_returns_without_waiting_for_losing_worker(monkeypatch):
