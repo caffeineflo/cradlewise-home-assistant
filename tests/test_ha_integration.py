@@ -245,6 +245,21 @@ async def test_config_flow_maps_rejected_token_to_invalid_auth(
     assert result["errors"] == {"base": "invalid_auth"}
 
 
+async def test_config_flow_does_not_misreport_proxy_forbidden_as_invalid_auth(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+) -> None:
+    aioclient_mock.get(INFO_URL, status=403)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+        data=_user_input(),
+    )
+
+    assert result["errors"] == {"base": "invalid_bridge_response"}
+
+
 async def test_config_flow_rejects_an_unsupported_bridge_api(
     hass: HomeAssistant,
     aioclient_mock: Any,

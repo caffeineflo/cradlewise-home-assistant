@@ -39,3 +39,5 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   preserving existing config-entry, entity, camera, and HomeKit identities.
 - Bound the bridge HTTP server to loopback by default and required a bearer
   token for non-loopback deployments.
+- Report upstream HTTP 403 responses as bridge API failures instead of
+  incorrectly identifying them as rejected bearer tokens.

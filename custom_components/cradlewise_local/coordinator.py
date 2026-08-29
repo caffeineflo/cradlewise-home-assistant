@@ -66,7 +66,7 @@ async def async_fetch_bridge_state(
         headers=request_headers(bearer_token),
         timeout=aiohttp.ClientTimeout(total=10),
     ) as response:
-        if response.status in {401, 403}:
+        if response.status == 401:
             await response.read()
             raise BridgeAuthenticationError("Bridge authentication failed")
         if response.status != 200:
@@ -100,7 +100,7 @@ async def async_fetch_bridge_info(
         headers=request_headers(bearer_token),
         timeout=aiohttp.ClientTimeout(total=10),
     ) as response:
-        if response.status in {401, 403}:
+        if response.status == 401:
             await response.read()
             raise BridgeAuthenticationError("Bridge authentication failed")
         if response.status != 200:
@@ -177,7 +177,7 @@ class CradlewiseStatusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
                 detail = await response.text()
-                if response.status in {401, 403}:
+                if response.status == 401:
                     raise HomeAssistantError("Bridge authentication failed")
                 if response.status != 200:
                     raise HomeAssistantError(
