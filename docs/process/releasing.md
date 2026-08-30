@@ -42,7 +42,8 @@ publishing it.
    tests, Ruff, yamllint, hassfest, package builds, and the bridge image build.
    The official HACS action must also pass against the pushed GitHub ref; local
    manifest-schema checks do not replace its repository metadata and tree
-   checks.
+   checks. Confirm that Dependabot reports zero open alerts. The tag workflow
+   enforces this before it can publish the client package or bridge image.
 4. Install the release candidate on Home Assistant and verify Automatic,
    Local only, Cloud only, reauthentication, reconfiguration, unload/reload,
    and optional media behavior.
