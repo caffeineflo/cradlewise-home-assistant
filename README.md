@@ -117,9 +117,19 @@ Add the repository to HACS directly:
 
 [![Open your Home Assistant instance and add this repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=caffeineflo&repository=cradlewise-home-assistant&category=integration)
 
-Then:
+The button adds this repository to HACS. It does not download or configure the
+integration.
 
-1. Install `Cradlewise` and restart Home Assistant.
+If the redirect is unavailable, add the repository manually:
+
+1. Open HACS and select the three-dot menu in the top-right corner.
+2. Select **Custom repositories**.
+3. Enter `https://github.com/caffeineflo/cradlewise-home-assistant`.
+4. Select **Integration** as the type and click **Add**.
+
+After the repository is added:
+
+1. Open `Cradlewise` in HACS, select **Download**, and restart Home Assistant.
 2. Open Settings -> Devices & services -> Add Integration -> Cradlewise.
 3. Choose Automatic, Local only, or Cloud only.
 4. Sign in once so the integration can discover the crib and provision its
