@@ -2,7 +2,8 @@
 
 The Home Assistant integration and `cradlewise-client` use the same release
 version. A release is intentionally manual because publishing the client to
-PyPI and making the HACS repository public are external, irreversible actions.
+PyPI, making the GHCR package public, and creating the GitHub release are
+external actions that require an explicit maintainer decision.
 
 ## One-time setup
 
