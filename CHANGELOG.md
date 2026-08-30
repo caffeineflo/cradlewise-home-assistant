@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-29
+
 ### Added
 
 - A standalone, media-free `cradlewise-client` Python distribution.
@@ -57,3 +59,6 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   listener instead of scheduling a second reload.
 - Return safe redacted diagnostics while an entry is temporarily unloaded
   during a reload.
+
+[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/caffeineflo/cradlewise-home-assistant/releases/tag/v0.1.0
