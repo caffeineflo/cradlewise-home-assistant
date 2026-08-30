@@ -25,7 +25,9 @@ bridge payloads, API normalization, config flow behavior, or entities.
 ## Reverse-engineering evidence
 
 Protocol changes should cite the relevant decompiled class or official API
-documentation in `docs/`. Do not commit APKs, decompiled output, certificates,
+documentation in `docs/`. Base reverse-engineering evidence only on APKs
+lawfully obtained from an installation you're authorized to use, not a
+third-party APK mirror. Do not commit APKs, decompiled output, certificates,
 tokens, account credentials, `.env`, or captures containing private baby data.
 
 ## Pull requests

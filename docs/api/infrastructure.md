@@ -31,7 +31,7 @@
 | Service | AWS Cognito |
 | User Pool ID | `us-east-1_hRGLsOxun` |
 | Client ID | `4jnn2bbtroa3e6ra73dc8m8luh` |
-| Client Secret | `qfmc9tv70upcacajmhpl4a9n3orehteo93icbng0fljkt6916em` |
+| Client Secret | Embedded client configuration; literal value omitted |
 | Identity Pool ID | `us-east-1:53b70db5-7440-4ecf-8dac-d6202eb6c1d2` |
 | Auth flow | Email/password via SRP -> JWT tokens |
 | Storage | AWSCognitoLegacyCredentialStore |

@@ -1,15 +1,14 @@
 # Decompilation Process
 
-Step-by-step guide for downloading, extracting, and decompiling the Cradlewise APK.
+Use this process only with APK files lawfully obtained from your own authorized
+installation of the Cradlewise app. Do not obtain app binaries from third-party
+APK mirrors or commit them to this repository.
 
 ## Prerequisites
 
 ```bash
-# Install Rust (if not already installed)
-brew install rustup && rustup-init -y
-
-# Install apkeep (EFF's APK downloader)
-cargo install apkeep
+# Install Android Debug Bridge
+brew install android-platform-tools
 
 # Install jadx (Java decompiler)
 brew install jadx
@@ -18,37 +17,45 @@ brew install jadx
 brew install apktool
 ```
 
-## Step 1: Download the APK
+## Step 1: Prepare Your Authorized Installation
+
+Install the Cradlewise app through its official distribution channel on an
+Android device that you own or control and are authorized to use. Enable USB
+debugging, connect the device, and confirm that ADB can see it:
+
+```bash
+adb devices
+```
+
+Continue only when the device appears as `device`, not `unauthorized`.
+
+## Step 2: Export the Installed APK Set
 
 ```bash
 cd /path/to/cradlewise
-apkeep -a com.cradlewise.nini.app .
+mkdir -p xapk_extracted
+adb shell pm path com.cradlewise.nini.app \
+  | sed 's/^package://' \
+  | tr -d '\r' \
+  | while IFS= read -r apk; do adb pull "$apk" xapk_extracted/; done
 ```
 
-This downloads from APKPure (no credentials needed). The result is typically an `.xapk` file (split APK bundle).
-
-## Step 2: Extract the XAPK
+Android installs the app as a base APK plus optional architecture, language,
+and density splits. Confirm that the export includes `base.apk`:
 
 ```bash
-mkdir -p xapk_extracted
-unzip -o com.cradlewise.nini.app.xapk -d xapk_extracted
+find xapk_extracted -maxdepth 1 -name '*.apk' -print
 ```
-
-Contents:
-- `com.cradlewise.nini.app.apk` -- Base APK (the one we want)
-- `config.arm64_v8a.apk` -- Native libraries (contains `libjingle_peerconnection_so.so`)
-- `config.*.apk` -- Language/density splits
-- `manifest.json` -- Version info and permissions
 
 Check the version:
 ```bash
-cat xapk_extracted/manifest.json | python3 -m json.tool | grep version
+adb shell dumpsys package com.cradlewise.nini.app | grep -m 1 'versionName='
 ```
 
 ## Step 3: Decompile with jadx
 
 ```bash
-jadx --deobf xapk_extracted/com.cradlewise.nini.app.apk -d decompiled
+jadx --deobf xapk_extracted/base.apk -d decompiled
 ```
 
 The `--deobf` flag renames obfuscated symbols for readability. This produces ~29,000 classes. Some decompilation errors (75 in v2.55.5) are normal.
@@ -68,10 +75,10 @@ Check if it's Flutter (it's not, but verify for future versions):
 
 ```bash
 # Look for Flutter artifacts
-unzip -l xapk_extracted/com.cradlewise.nini.app.apk | grep -iE 'flutter|libapp|dart'
+find xapk_extracted -name '*.apk' -exec unzip -l {} \; | grep -iE 'flutter|libapp|dart'
 
-# Check native libs in the arm64 split
-unzip -l xapk_extracted/config.arm64_v8a.apk | grep '\.so'
+# Check native libraries across the installed APK set
+find xapk_extracted -name '*.apk' -exec unzip -l {} \; | grep '\.so'
 ```
 
 If `libflutter.so` and `libapp.so` are present, the app has been rewritten in Flutter and you'll need `blutter` instead of jadx.
@@ -153,6 +160,6 @@ Only commit the documentation in `docs/`.
 ## Updating for a New Version
 
 1. Delete or move old extracted/decompiled dirs
-2. Re-run steps 1-5
+2. Re-run steps 1-5 with the updated authorized installation
 3. Compare findings against existing docs in `docs/api/`
 4. Update docs and commit -- `git diff` shows what changed
