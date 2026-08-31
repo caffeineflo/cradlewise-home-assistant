@@ -30,12 +30,11 @@ The app uses AWS Cognito User Pools with SRP (Secure Remote Password) auth.
 |----------|-------|
 | User Pool ID | `us-east-1_hRGLsOxun` |
 | Client ID | `4jnn2bbtroa3e6ra73dc8m8luh` |
-| Client Secret | Embedded client configuration; literal value omitted |
 | Identity Pool ID | `us-east-1:53b70db5-7440-4ecf-8dac-d6202eb6c1d2` |
 | Region | `us-east-1` |
 
-The installed app includes the client configuration used for Cognito
-authentication. This document intentionally omits embedded credential values.
+The runtime client supplies the app-client configuration required by Cognito
+authentication.
 
 **Flow:**
 
