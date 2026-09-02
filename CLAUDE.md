@@ -51,7 +51,8 @@ Requires: `paho-mqtt`, `aiortc`, `numpy`, `ffmpeg` (for ffplay)
 
 When a new Cradlewise app version is released:
 
-1. Follow `docs/process/decompilation.md` to download and decompile
+1. Follow `docs/process/decompilation.md` to export and decompile the app from
+   your own authorized installation
 2. Run the analysis searches documented there
 3. Update each file in `docs/api/` with any changes
 4. Update the version number in `README.md`
@@ -62,7 +63,7 @@ When a new Cradlewise app version is released:
 - **Package:** `com.cradlewise.nini.app`
 - **App type:** Native Android (Kotlin + Jetpack Compose) -- NOT Flutter
 - **Decompiler:** jadx (with --deobf flag)
-- **APK source:** apkeep (downloads from APKPure, no credentials needed)
+- **APK source:** APK files exported from the researcher's own authorized installation
 - **Crib software:** AWS Greengrass with Janus WebRTC gateway
 - **Local MQTT:** `ssl://<crib_ip>:8883`, mutual TLS, no username/password
 - **Video:** 1280x720 H264 Baseline @ ~10fps over DTLS-SRTP
@@ -152,7 +153,7 @@ This repo now includes a Home Assistant custom component. Key considerations:
 
 ## Tools Required
 
-- `apkeep` (Rust, install via `cargo install apkeep`)
+- `adb` (install via `brew install android-platform-tools`)
 - `jadx` (install via `brew install jadx`)
 - `apktool` (install via `brew install apktool` -- optional, for resources)
 - Python 3.10+ with venv (for fetch_certs.py and stream_local.py)
