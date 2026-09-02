@@ -1,6 +1,7 @@
 # Contributing
 
 Thanks for helping improve Cradlewise support in Home Assistant.
+By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Development setup
 
