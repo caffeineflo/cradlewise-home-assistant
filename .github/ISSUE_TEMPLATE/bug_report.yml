@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a reproducible problem with the integration or media bridge
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Cradlewise support.
+
+        Do not upload baby images or video, credentials, device certificates,
+        tokens, or private hostnames. Redact them from logs before submitting.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Home Assistant integration
+        - Cradle state or controls
+        - Video or media bridge
+        - Certificate provisioning or cloud fallback
+        - Packaging or documentation
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Include the integration version or commit SHA you tested.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: home_assistant_version
+    attributes:
+      label: Home Assistant version
+      description: Leave blank if the problem only affects the standalone bridge.
+      placeholder: 2026.9.0
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the actual behavior and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: List the smallest reliable sequence that triggers the problem.
+      placeholder: |
+        1. Configure...
+        2. Restart...
+        3. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Include only logs needed to understand the failure.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I reproduced this with the latest release or current main branch.
+          required: true
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed all private media, credentials, tokens, certificates, and hostnames.
+          required: true

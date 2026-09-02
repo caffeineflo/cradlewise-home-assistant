@@ -1,0 +1,56 @@
+name: Feature request
+description: Propose a focused improvement to the integration or media bridge
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the user problem first. Local-first behavior and privacy-preserving
+        defaults are project requirements.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Home Assistant integration
+        - Cradle state or controls
+        - Video or media bridge
+        - Certificate provisioning or cloud fallback
+        - Packaging or documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the current limitation and who it affects.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired behavior
+      description: Describe the smallest useful outcome, including privacy expectations.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include any existing Home Assistant or bridge workaround.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues for the same request.
+          required: true
+        - label: This request does not require private media or credentials to be shared.
+          required: true
