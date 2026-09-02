@@ -77,6 +77,9 @@ log = logging.getLogger("stream_local")
 MQTT_PORT = 8883
 MQTT_SERVER_CA_FILE = "server_ca.pem"
 KEEPALIVE_INTERVAL_S = 5
+MQTT_RECONNECT_MIN_DELAY_SECONDS = 1
+MQTT_RECONNECT_MAX_DELAY_SECONDS = 10
+MQTT_RECONNECT_GRACE_SECONDS = 30
 DEVICE_ID = uuid.uuid4().hex[:16]
 
 DISCOVERY_UDP_PORT = 5055
@@ -358,6 +361,7 @@ class CribStreamer:
         self._keepalive_task = None
         self._track_tasks = set()
         self._fatal_future = None
+        self._mqtt_reconnect_handle = None
         self._shutting_down = False
         self._frame_count = 0
 
@@ -386,11 +390,16 @@ class CribStreamer:
         client.on_connect = self._on_connect
         client.on_message = self._on_message
         client.on_disconnect = self._on_disconnect
+        client.reconnect_delay_set(
+            min_delay=MQTT_RECONNECT_MIN_DELAY_SECONDS,
+            max_delay=MQTT_RECONNECT_MAX_DELAY_SECONDS,
+        )
         self._mqtt = client
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code == 0:
             log.info("MQTT connected to %s:%d (flags=%s)", self.ip, MQTT_PORT, flags)
+            self._cancel_mqtt_reconnect_grace_threadsafe()
             self._handle_mqtt_connected()
             result, _ = client.subscribe(self.topic)
             if result != mqtt.MQTT_ERR_SUCCESS:
@@ -420,9 +429,45 @@ class CribStreamer:
         log.warning("MQTT disconnected: reason_code=%s flags=%s", reason_code, flags)
         self._handle_mqtt_disconnected()
         if reason_code != 0 and not self._shutting_down:
-            self._signal_fatal_threadsafe(
-                RuntimeError(f"MQTT disconnected: {reason_code}")
+            self._start_mqtt_reconnect_grace_threadsafe(reason_code)
+
+    def _start_mqtt_reconnect_grace_threadsafe(self, reason_code):
+        if self._loop is not None and not self._loop.is_closed():
+            self._loop.call_soon_threadsafe(
+                self._start_mqtt_reconnect_grace,
+                reason_code,
             )
+
+    def _start_mqtt_reconnect_grace(self, reason_code):
+        if self._shutting_down or self._mqtt_reconnect_handle is not None:
+            return
+        self._mqtt_reconnect_handle = self._loop.call_later(
+            MQTT_RECONNECT_GRACE_SECONDS,
+            self._mqtt_reconnect_grace_expired,
+            reason_code,
+        )
+
+    def _mqtt_reconnect_grace_expired(self, reason_code):
+        self._mqtt_reconnect_handle = None
+        if self._shutting_down:
+            return
+        self._signal_fatal(
+            RuntimeError(
+                "MQTT did not reconnect within "
+                f"{MQTT_RECONNECT_GRACE_SECONDS:g} seconds after disconnect: "
+                f"{reason_code}"
+            )
+        )
+
+    def _cancel_mqtt_reconnect_grace_threadsafe(self):
+        if self._loop is not None and not self._loop.is_closed():
+            self._loop.call_soon_threadsafe(self._cancel_mqtt_reconnect_grace)
+
+    def _cancel_mqtt_reconnect_grace(self):
+        if self._mqtt_reconnect_handle is None:
+            return
+        self._mqtt_reconnect_handle.cancel()
+        self._mqtt_reconnect_handle = None
 
     def _handle_mqtt_connected(self):
         return None
@@ -756,6 +801,7 @@ class CribStreamer:
         self._loop = asyncio.get_running_loop()
         self._queue = asyncio.Queue(maxsize=512)
         self._fatal_future = self._loop.create_future()
+        self._shutting_down = False
 
         message_task = None
         mqtt_loop_started = False
@@ -783,6 +829,7 @@ class CribStreamer:
         finally:
             log.info("Shutting down...")
             self._shutting_down = True
+            self._cancel_mqtt_reconnect_grace()
             if message_task is not None:
                 message_task.cancel()
                 await asyncio.gather(message_task, return_exceptions=True)
