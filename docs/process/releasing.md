@@ -2,7 +2,8 @@
 
 The Home Assistant integration and `cradlewise-client` use the same release
 version. A release is intentionally manual because publishing the client to
-PyPI and making the HACS repository public are external, irreversible actions.
+PyPI, making the GHCR package public, and creating the GitHub release are
+external actions that require an explicit maintainer decision.
 
 ## One-time setup
 
@@ -41,7 +42,8 @@ publishing it.
    tests, Ruff, yamllint, hassfest, package builds, and the bridge image build.
    The official HACS action must also pass against the pushed GitHub ref; local
    manifest-schema checks do not replace its repository metadata and tree
-   checks.
+   checks. Confirm that Dependabot reports zero open alerts. The tag workflow
+   enforces this before it can publish the client package or bridge image.
 4. Install the release candidate on Home Assistant and verify Automatic,
    Local only, Cloud only, reauthentication, reconfiguration, unload/reload,
    and optional media behavior.

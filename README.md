@@ -39,8 +39,7 @@ application or firmware code are out of scope.
 
 ## Status
 
-This is pre-release software being hardened against a live crib before its
-first HACS release. The supported release surface is intentionally small:
+The supported release surface is intentionally small:
 
 - Direct local MQTT state and controls over the crib's mTLS Greengrass broker
 - Cradlewise AWS IoT MQTT state and controls for cloud fallback or cloud-only use
@@ -114,13 +113,26 @@ using its local state or command path.
 
 ## Home Assistant installation
 
-Until the first tagged release is published:
+Add the repository to HACS directly:
 
-1. Add this repository to HACS as a custom `Integration` repository.
-2. Install `Cradlewise` and restart Home Assistant.
-3. Open Settings -> Devices & services -> Add Integration -> Cradlewise.
-4. Choose Automatic, Local only, or Cloud only.
-5. Sign in once so the integration can discover the crib and provision its
+[![Open your Home Assistant instance and add this repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=caffeineflo&repository=cradlewise-home-assistant&category=integration)
+
+The button adds this repository to HACS. It does not download or configure the
+integration.
+
+If the redirect is unavailable, add the repository manually:
+
+1. Open HACS and select the three-dot menu in the top-right corner.
+2. Select **Custom repositories**.
+3. Enter `https://github.com/caffeineflo/cradlewise-home-assistant`.
+4. Select **Integration** as the type and click **Add**.
+
+After the repository is added:
+
+1. Open `Cradlewise` in HACS, select **Download**, and restart Home Assistant.
+2. Open Settings -> Devices & services -> Add Integration -> Cradlewise.
+3. Choose Automatic, Local only, or Cloud only.
+4. Sign in once so the integration can discover the crib and provision its
    device certificate.
 
 To add video later, open the integration's Configure action and enter the media
@@ -133,9 +145,9 @@ Assistant cannot load two integrations with the same domain, so remove
 the canonical domain because it is not replacing a built-in integration and
 the other repository is not in the default HACS catalog.
 
-The first public HACS release depends on the separately versioned
-`cradlewise-client` package. Tag CI publishes the matching client version to
-PyPI after validation and before you create the full GitHub release.
+Each HACS release depends on the separately versioned `cradlewise-client`
+package. Tag CI publishes the matching client version to PyPI after validation
+and before it creates the full GitHub release.
 
 See [Release Process](docs/process/releasing.md) for the guarded PyPI and HACS
 release sequence.
@@ -293,8 +305,8 @@ ghcr.io/caffeineflo/cradlewise-local-bridge
 Published tags include the release tag, its semantic version aliases, and the
 short git SHA. For a server deployment, pull a published release version and
 recreate the bridge container deliberately rather than auto-deploying from CI.
-The example Compose file uses `CRADLEWISE_BRIDGE_VERSION=0.1.0`; that tag and
-the GHCR package must be public as part of the first release.
+The example Compose file uses `CRADLEWISE_BRIDGE_VERSION=0.1.0`. Select the
+version matching the integration release you installed.
 
 ## Local Development
 
