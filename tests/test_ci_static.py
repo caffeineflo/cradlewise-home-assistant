@@ -56,6 +56,35 @@ def test_ci_actions_are_pinned_to_full_commit_shas():
     assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in action_references)
 
 
+def test_ci_cancels_superseded_pull_request_runs():
+    workflow = Path(".github/workflows/tests.yml").read_text()
+
+    assert (
+        "group: ci-${{ github.event.pull_request.number || github.ref }}" in workflow
+        and "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
+    )
+
+
+def test_ci_jobs_have_explicit_timeouts():
+    workflow = Path(".github/workflows/tests.yml").read_text()
+
+    assert workflow.count("    timeout-minutes:") == 6
+
+
+def test_ci_blocks_new_high_severity_dependency_vulnerabilities():
+    workflow = Path(".github/workflows/tests.yml").read_text()
+    dependency_review_job = workflow.split("  dependency-review:", 1)[1].split(
+        "  test:", 1
+    )[0]
+
+    assert (
+        "if: github.event_name == 'pull_request'" in dependency_review_job
+        and "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294"
+        in dependency_review_job
+        and "fail-on-severity: high" in dependency_review_job
+    )
+
+
 def test_release_package_write_permission_is_bridge_publish_only():
     workflow = Path(".github/workflows/release.yml").read_text()
     publish_job = workflow.split("  bridge-image-publish:", 1)[1].split(
