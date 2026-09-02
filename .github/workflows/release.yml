@@ -16,6 +16,28 @@ env:
   BRIDGE_IMAGE: ghcr.io/caffeineflo/cradlewise-local-bridge
 
 jobs:
+  dependabot-audit:
+    runs-on: ubuntu-latest
+    permissions: read-all
+
+    steps:
+      - name: Require zero open Dependabot alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          open_alerts="$(
+            gh api --paginate \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/${GITHUB_REPOSITORY}/dependabot/alerts?state=open&per_page=100" \
+              --jq '.[].number'
+          )"
+          if [[ -n "${open_alerts}" ]]; then
+            alert_count="$(wc -l <<< "${open_alerts}" | tr -d ' ')"
+            echo "::error::Dependabot reports ${alert_count} open vulnerability alert(s)."
+            exit 1
+          fi
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -112,6 +134,7 @@ jobs:
   client-package-build:
     runs-on: ubuntu-latest
     needs:
+      - dependabot-audit
       - test
       - lint
       - home-assistant-test
@@ -174,6 +197,7 @@ jobs:
   bridge-image-publish:
     runs-on: ubuntu-latest
     needs:
+      - dependabot-audit
       - test
       - lint
       - home-assistant-test

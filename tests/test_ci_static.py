@@ -83,16 +83,48 @@ def test_client_publish_uses_trusted_publishing_without_repository_checkout():
     )
 
 
-def test_client_release_build_is_test_gated_without_oidc_permission():
+def test_client_release_build_requires_all_unprivileged_gates():
     workflow = Path(".github/workflows/release.yml").read_text()
     build_job = workflow.split("  client-package-build:", 1)[1].split(
         "  client-package-publish:", 1
     )[0]
+    needs_block = build_job.split("    needs:", 1)[1].split("\n\n", 1)[0]
+    required_jobs = set(re.findall(r"^      - (.+)$", needs_block, re.MULTILINE))
 
     assert (
-        "needs:\n      - test\n      - lint" in build_job
+        required_jobs
+        == {
+            "dependabot-audit",
+            "test",
+            "lint",
+            "home-assistant-test",
+            "home-assistant-validation",
+        }
         and "actions/upload-artifact@" in build_job
         and "id-token: write" not in build_job
+    )
+
+
+def test_bridge_release_requires_dependabot_audit():
+    workflow = Path(".github/workflows/release.yml").read_text()
+    publish_job = workflow.split("  bridge-image-publish:", 1)[1].split(
+        "  github-release:", 1
+    )[0]
+    needs_block = publish_job.split("    needs:", 1)[1].split("\n    permissions:", 1)[
+        0
+    ]
+
+    assert "      - dependabot-audit" in needs_block
+
+
+def test_release_dependabot_audit_queries_open_alerts_and_fails_closed():
+    workflow = Path(".github/workflows/release.yml").read_text()
+    audit_job = workflow.split("  dependabot-audit:", 1)[1].split("  test:", 1)[0]
+
+    assert (
+        "permissions: read-all" in audit_job
+        and "dependabot/alerts?state=open" in audit_job
+        and "exit 1" in audit_job
     )
 
 
