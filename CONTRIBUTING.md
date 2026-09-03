@@ -14,9 +14,9 @@ uv sync --extra test --extra ha-test
 Run the same core checks used by CI:
 
 ```bash
-uv run --frozen --extra test python -m pytest
-uv run --frozen --extra test ruff check .
-uv run --frozen --extra test ruff format --check .
+uv run --locked --extra test python -m pytest
+uv run --locked --extra test ruff check .
+uv run --locked --extra test ruff format --check .
 ```
 
 Changes to the Home Assistant integration must keep the `cradlewise`

@@ -6,7 +6,7 @@ def test_dockerfile_installs_from_uv_lock():
     dockerfile = Path("Dockerfile").read_text()
 
     assert "uv.lock" in dockerfile
-    assert "uv sync --frozen" in dockerfile
+    assert "uv sync --locked" in dockerfile
     assert "pip install --no-cache-dir -e ." not in dockerfile
 
 
@@ -20,7 +20,7 @@ def test_dockerfile_installs_mqtt_ca_pin_console_script():
     dockerfile = Path("Dockerfile").read_text()
     source_stage = dockerfile.split("COPY cradlewise_local ./cradlewise_local", 1)[1]
 
-    assert "uv sync --frozen --no-dev" in source_stage
+    assert "uv sync --locked --no-dev" in source_stage
     assert "test -x /app/.venv/bin/cradlewise-pin-mqtt-ca" in source_stage
 
 
@@ -63,6 +63,20 @@ def test_ci_cancels_superseded_pull_request_runs():
         "group: ci-${{ github.event.pull_request.number || github.ref }}" in workflow
         and "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
     )
+
+
+def test_ci_and_release_reject_stale_uv_lockfiles():
+    workflows = "\n".join(
+        path.read_text() for path in Path(".github/workflows").glob("*.yml")
+    )
+
+    assert "--locked" in workflows and "--frozen" not in workflows
+
+
+def test_dependabot_updates_the_uv_lockfile():
+    dependabot = Path(".github/dependabot.yml").read_text()
+
+    assert "package-ecosystem: uv" in dependabot
 
 
 def test_ci_jobs_have_explicit_timeouts():
