@@ -30,8 +30,8 @@
 | GET | `/babyProfiles/{babyId}/users/{emailId}` | Get user access for baby |
 | PUT | `/babyProfiles/{babyId}/users/{emailId}/v2` | Modify caregiver access |
 | DELETE | `/babyProfiles/{babyId}/users/{emailId}` | Delete caregiver access |
-| GET | `/babyProfiles/{babyId}/userDevices` | Get user devices for baby |
-| POST | `/babyProfiles/{babyId}/userDevices/remove` | Remove user devices |
+| GET | `/babyProfiles/{babyId}/userDevices?email_id={email}` | Get an account's registered devices for a baby |
+| POST | `/babyProfiles/{babyId}/userDevices/remove` | Remove exact device IDs with `{"device_ids":[...]}`; returns `{"removed_devices":[...]}` |
 | POST | `/babyProfiles/{babyId}/invites/v2` | Generate invite codes |
 
 ## Sleep Tracks
@@ -95,3 +95,6 @@
 - `com/cradlewise/nini/features/subscriptions/api/BackendService.java`
 - `com/cradlewise/nini/features/videohistory/BackendService.java`
 - `com/cradlewise/nini/feature/videomoments/api/BackendService.java`
+- `com/cradlewise/nini/app/aws/AwsBackendService.java`
+- `com/cradlewise/nini/app/model/RemoveDevicesRequest.java`
+- `com/cradlewise/nini/app/model/RemoveDevicesResponse.java`

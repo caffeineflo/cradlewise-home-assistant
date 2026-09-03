@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import cradlewise_client.cloud as cloud
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
-from cradlewise_client.cloud import CloudAccountClient, CradleAccount
+from cradlewise_client.cloud import CloudAccountClient, CradleAccount, UserDevice
 
 
 class FakeResponse:
@@ -172,6 +172,7 @@ def test_provisioning_classifies_certificate_objects(monkeypatch):
     credentials = client.provision_credentials(
         CradleAccount(baby_id=4, cradle_id="crib-1", name="A")
     )
+    registration = json.loads(session.requests[0][3])
 
     assert (
         credentials.device_id,
@@ -181,6 +182,73 @@ def test_provisioning_classifies_certificate_objects(monkeypatch):
         "device-1",
         "TEST PRIVATE KEY MATERIAL",
         "-----BEGIN CERTIFICATE-----\ncert",
+    )
+    assert registration["device"]["device_name"].startswith(cloud.ANDROID_DEVICE_MODELS)
+    assert len(registration["device"]["device_name"].rsplit("_", 1)[1]) == 16
+
+
+def test_list_user_devices_returns_only_authenticated_users_devices(monkeypatch):
+    session = FakeSession(
+        [
+            FakeResponse(
+                200,
+                {
+                    "user_devices": [
+                        {
+                            "email_id": "user@example.com",
+                            "devices": [
+                                {
+                                    "device_id": "ha-device",
+                                    "device_name": "Home Assistant",
+                                    "os": "android",
+                                    "model": None,
+                                }
+                            ],
+                        },
+                        {
+                            "email_id": "caregiver@example.com",
+                            "devices": [{"device_id": "caregiver-device"}],
+                        },
+                    ]
+                },
+            )
+        ]
+    )
+    client = _authenticated(
+        CloudAccountClient(email="user@example.com", password="secret", session=session)
+    )
+    monkeypatch.setattr(cloud, "sign_request", lambda *args, **kwargs: {})
+
+    devices = client.list_user_devices(
+        CradleAccount(baby_id=4, cradle_id="crib-1", name="A")
+    )
+
+    assert devices == [
+        UserDevice(
+            device_id="ha-device",
+            device_name="Home Assistant",
+            os="android",
+            model=None,
+        )
+    ]
+
+
+def test_remove_user_devices_posts_exact_ids_and_requires_confirmation(monkeypatch):
+    session = FakeSession([FakeResponse(200, {"removed_devices": ["ha-device"]})])
+    client = _authenticated(
+        CloudAccountClient(email="user@example.com", password="secret", session=session)
+    )
+    monkeypatch.setattr(cloud, "sign_request", lambda *args, **kwargs: {})
+
+    removed = client.remove_user_devices(
+        CradleAccount(baby_id=4, cradle_id="crib-1", name="A"),
+        ["ha-device"],
+    )
+
+    assert (removed, session.requests[0][0], session.requests[0][3]) == (
+        ["ha-device"],
+        "POST",
+        '{"device_ids":["ha-device"]}',
     )
 
 
