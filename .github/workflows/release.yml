@@ -58,11 +58,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Run tests
-        run: uv run --frozen --python "${{ matrix.python-version }}" --extra test python -m pytest
+        run: uv run --locked --python "${{ matrix.python-version }}" --extra test python -m pytest
 
       - name: Compile Python files
         run: >-
-          uv run --frozen --python "${{ matrix.python-version }}" python -m compileall
+          uv run --locked --python "${{ matrix.python-version }}" python -m compileall
           cradlewise_local custom_components packages tests stream_local.py cradlewise_api.py
 
       - name: Build client package
@@ -84,14 +84,14 @@ jobs:
           python-version: "3.12"
 
       - name: Check Python lint
-        run: uv run --frozen --python 3.12 --extra test ruff check .
+        run: uv run --locked --python 3.12 --extra test ruff check .
 
       - name: Check Python formatting
-        run: uv run --frozen --python 3.12 --extra test ruff format --check .
+        run: uv run --locked --python 3.12 --extra test ruff format --check .
 
       - name: Check YAML
         run: >-
-          uv run --frozen --python 3.12 --extra test yamllint
+          uv run --locked --python 3.12 --extra test yamllint
           -d '{extends: default, rules: {document-start: disable, line-length: disable,
           truthy: disable}}' .github examples
 
@@ -112,7 +112,7 @@ jobs:
 
       - name: Run Home Assistant integration tests
         run: >-
-          uv run --frozen --python 3.14 --extra test --extra ha-test
+          uv run --locked --python 3.14 --extra test --extra ha-test
           python -m pytest tests/test_ha_integration.py tests/test_ha_coordinator.py
 
   home-assistant-validation:

@@ -17,12 +17,12 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY packages/cradlewise-client ./packages/cradlewise-client
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra observability --no-install-project
+    uv sync --locked --no-dev --extra observability --no-install-project
 
 COPY cradlewise_local ./cradlewise_local
 COPY stream_local.py cradlewise_api.py ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra observability \
+    uv sync --locked --no-dev --extra observability \
     && test -x /app/.venv/bin/cradlewise-pin-mqtt-ca
 RUN groupadd --gid 10001 cradlewise \
     && useradd --uid 10001 --gid cradlewise --home-dir /app --no-create-home cradlewise \
