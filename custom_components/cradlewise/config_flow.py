@@ -29,12 +29,15 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .config_helpers import (
     bridge_base_url,
+    http_url_resolves_to_private_network,
+    http_url_uses_tls,
     info_url_from_status_url,
     is_http_url,
     is_rtsp_url,
     snapshot_url_from_status_url,
 )
 from .const import (
+    CONF_ALLOW_INSECURE_HTTP,
     CONF_BABY_ID,
     CONF_BEARER_TOKEN,
     CONF_BRIDGE_API_VERSION,
@@ -42,6 +45,7 @@ from .const import (
     CONF_BRIDGE_VERSION,
     CONF_CLIENT_CERTIFICATE,
     CONF_CLIENT_PRIVATE_KEY,
+    CONF_CONFIRM_REGISTRATION_REMOVAL,
     CONF_CONNECTION_MODE,
     CONF_CRADLE_ID,
     CONF_DEVICE_ID,
@@ -137,6 +141,27 @@ def _media_schema(
             vol.Optional(CONF_BEARER_TOKEN): selector.TextSelector(
                 selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
             ),
+            vol.Optional(
+                CONF_ALLOW_INSECURE_HTTP,
+                default=False,
+            ): selector.BooleanSelector(),
+        }
+    )
+
+
+def _registration_removal_schema(email: str) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(CONF_EMAIL, default=email): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
+            ),
+            vol.Optional(CONF_PASSWORD): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+            ),
+            vol.Required(
+                CONF_CONFIRM_REGISTRATION_REMOVAL,
+                default=False,
+            ): selector.BooleanSelector(),
         }
     )
 
@@ -198,7 +223,7 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             mode = str(user_input.get(CONF_CONNECTION_MODE, ""))
             if mode in CONNECTION_MODES:
                 self._mode = mode
-                return await self.async_step_account()
+                return await getattr(self, f"async_step_account_{mode}")()
             errors["base"] = "invalid_connection_mode"
         return self.async_show_form(
             step_id="user",
@@ -206,8 +231,30 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_account(
+    async def async_step_account_automatic(
         self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Collect credentials retained for automatic cloud fallback."""
+        return await self._async_step_account("account_automatic", user_input)
+
+    async def async_step_account_local(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Collect credentials discarded after local-only provisioning."""
+        return await self._async_step_account("account_local", user_input)
+
+    async def async_step_account_cloud(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Collect credentials retained for cloud-only operation."""
+        return await self._async_step_account("account_cloud", user_input)
+
+    async def _async_step_account(
+        self,
+        step_id: str,
         user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Authenticate once for discovery and certificate provisioning."""
@@ -241,7 +288,7 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return await self.async_step_select_cradle()
 
         return self.async_show_form(
-            step_id="account",
+            step_id=step_id,
             data_schema=_account_schema(),
             errors=errors,
         )
@@ -516,12 +563,22 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class CradlewiseOptionsFlow(OptionsFlow):
-    """Configure or remove the optional media companion."""
+    """Configure media or explicitly remove a cloud device registration."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._entry = config_entry
 
     async def async_step_init(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Choose an integration option."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["media", "remove_registration"],
+        )
+
+    async def async_step_media(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
@@ -537,17 +594,33 @@ class CradlewiseOptionsFlow(OptionsFlow):
             if not is_http_url(bridge_url):
                 errors["base"] = "invalid_bridge_status_url"
             else:
-                token = str(user_input.get(CONF_BEARER_TOKEN, "")).strip()
-                if not token:
-                    token = str(current.get(CONF_BEARER_TOKEN, ""))
-                data, error = await self._async_media_data(bridge_url, token)
-                if error is not None:
-                    errors["base"] = error
-                elif data is not None:
-                    return self.async_create_entry(title="", data=data)
+                if not http_url_uses_tls(bridge_url):
+                    try:
+                        is_private = await self.hass.async_add_executor_job(
+                            http_url_resolves_to_private_network,
+                            bridge_url,
+                        )
+                    except OSError:
+                        errors["base"] = "cannot_connect"
+                    else:
+                        if not is_private:
+                            errors["base"] = "insecure_public_http"
+                        elif not user_input.get(CONF_ALLOW_INSECURE_HTTP, False):
+                            errors["base"] = "insecure_http_requires_confirmation"
+                if not errors:
+                    token = str(user_input.get(CONF_BEARER_TOKEN, "")).strip()
+                    if not token:
+                        token = str(current.get(CONF_BEARER_TOKEN, ""))
+                    data, error = await self._async_media_data(bridge_url, token)
+                    if error is not None:
+                        errors["base"] = error
+                    elif data is not None:
+                        if not http_url_uses_tls(bridge_url):
+                            data[CONF_ALLOW_INSECURE_HTTP] = True
+                        return self.async_create_entry(title="", data=data)
 
         return self.async_show_form(
-            step_id="init",
+            step_id="media",
             data_schema=self.add_suggested_values_to_schema(
                 _media_schema(str(current.get(CONF_BRIDGE_STATUS_URL, ""))),
                 {
@@ -556,6 +629,76 @@ class CradlewiseOptionsFlow(OptionsFlow):
             ),
             errors=errors,
         )
+
+    async def async_step_remove_registration(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Remove exactly this integration's cloud device registration."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            email = str(user_input.get(CONF_EMAIL, "")).strip()
+            password = str(user_input.get(CONF_PASSWORD, ""))
+            if not password:
+                password = str(self._entry.data.get(CONF_PASSWORD, ""))
+            if not user_input.get(CONF_CONFIRM_REGISTRATION_REMOVAL, False):
+                errors["base"] = "registration_removal_not_confirmed"
+            elif not email or not password:
+                errors["base"] = "cleanup_invalid_auth"
+            else:
+                try:
+                    await self.hass.async_add_executor_job(
+                        self._remove_registration,
+                        email,
+                        password,
+                    )
+                except CloudAuthenticationError:
+                    errors["base"] = "cleanup_invalid_auth"
+                except RegistrationWrongCradleError:
+                    errors["base"] = "cleanup_wrong_cradle"
+                except RegistrationNotFoundError:
+                    errors["base"] = "registration_not_found"
+                except CloudApiError:
+                    errors["base"] = "cleanup_cannot_connect"
+                else:
+                    await self.hass.config_entries.async_remove(self._entry.entry_id)
+                    return self.async_abort(reason="registration_removed")
+
+        return self.async_show_form(
+            step_id="remove_registration",
+            data_schema=self.add_suggested_values_to_schema(
+                _registration_removal_schema(str(self._entry.data.get(CONF_EMAIL, ""))),
+                {CONF_EMAIL: self._entry.data.get(CONF_EMAIL, "")},
+            ),
+            description_placeholders={
+                "device_id": str(self._entry.data[CONF_DEVICE_ID])
+            },
+            errors=errors,
+        )
+
+    def _remove_registration(self, email: str, password: str) -> None:
+        cloud = CloudAccountClient(email=email, password=password)
+        cloud.authenticate()
+        accounts = cloud.list_accounts()
+        cradle_id = str(self._entry.data[CONF_CRADLE_ID])
+        account = next(
+            (account for account in accounts if account.cradle_id == cradle_id),
+            None,
+        )
+        if account is None:
+            raise RegistrationWrongCradleError("account does not contain this crib")
+        device_id = str(self._entry.data[CONF_DEVICE_ID])
+        if device_id not in {
+            device.device_id for device in cloud.list_user_devices(account)
+        }:
+            raise RegistrationNotFoundError(
+                "integration device registration was not found"
+            )
+        removed = cloud.remove_user_devices(account, [device_id])
+        if removed != [device_id]:
+            raise CloudApiError(
+                "Cradlewise did not confirm the requested device registration removal"
+            )
 
     async def _async_media_data(
         self,
@@ -593,3 +736,11 @@ class CradlewiseOptionsFlow(OptionsFlow):
         if token:
             data[CONF_BEARER_TOKEN] = token
         return data, None
+
+
+class RegistrationWrongCradleError(CloudApiError):
+    """Raised when cleanup credentials do not contain the configured crib."""
+
+
+class RegistrationNotFoundError(CloudApiError):
+    """Raised when the configured device registration is already absent."""

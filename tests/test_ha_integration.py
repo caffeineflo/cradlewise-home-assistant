@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -12,6 +13,7 @@ try:
     from homeassistant.const import CONF_EMAIL, CONF_NAME, CONF_PASSWORD
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers import entity_registry as er
+    from homeassistant.helpers import issue_registry as ir
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 except ModuleNotFoundError:
     pytest.skip(
@@ -19,10 +21,15 @@ except ModuleNotFoundError:
         allow_module_level=True,
     )
 
-from cradlewise_client.cloud import CradleAccount, ProvisionedCredentials
+from cradlewise_client.certificates import BrokerCertificateError
+from cradlewise_client.cloud import CradleAccount, ProvisionedCredentials, UserDevice
 
-from custom_components.cradlewise.config_flow import CradlewiseOptionsFlow
+from custom_components.cradlewise.config_flow import (
+    CradlewiseOptionsFlow,
+    RegistrationNotFoundError,
+)
 from custom_components.cradlewise.const import (
+    CONF_ALLOW_INSECURE_HTTP,
     CONF_BABY_ID,
     CONF_BEARER_TOKEN,
     CONF_BRIDGE_API_VERSION,
@@ -30,11 +37,13 @@ from custom_components.cradlewise.const import (
     CONF_BRIDGE_VERSION,
     CONF_CLIENT_CERTIFICATE,
     CONF_CLIENT_PRIVATE_KEY,
+    CONF_CONFIRM_REGISTRATION_REMOVAL,
     CONF_CONNECTION_MODE,
     CONF_CRADLE_ID,
     CONF_DEVICE_ID,
     CONF_GROUP_CA_CERTIFICATE,
     CONF_LOCAL_HOST,
+    CONF_REMOVE_OLD_REGISTRATION,
     CONF_SERVER_CA_CERTIFICATE,
     CONF_SNAPSHOT_URL,
     CONF_STREAM_URL,
@@ -46,6 +55,10 @@ from custom_components.cradlewise.const import (
 from custom_components.cradlewise.coordinator import CradlewiseCoordinator
 from custom_components.cradlewise.diagnostics import (
     async_get_config_entry_diagnostics,
+)
+from custom_components.cradlewise.repairs import (
+    ClientCertificateRepairFlow,
+    async_update_client_certificate_issue,
 )
 
 pytestmark = [
@@ -73,6 +86,10 @@ def _credentials() -> ProvisionedCredentials:
 
 def _account() -> CradleAccount:
     return CradleAccount(baby_id=42, cradle_id=CRADLE_ID, name="Nursery Crib")
+
+
+def time_to_datetime(offset_seconds: int) -> datetime:
+    return datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)
 
 
 def _base_entry_data() -> dict[str, Any]:
@@ -197,7 +214,7 @@ async def _start_account_flow(
         data={CONF_CONNECTION_MODE: mode},
     )
     assert result["type"] is data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "account"
+    assert result["step_id"] == f"account_{mode}"
     return await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input={CONF_EMAIL: "parent@example.com", CONF_PASSWORD: "secret"},
@@ -540,6 +557,7 @@ async def test_reauth_updates_credentials_for_the_existing_cradle(
 async def test_media_options_validate_identity_and_derive_endpoints(
     hass: HomeAssistant,
     aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -549,25 +567,36 @@ async def test_media_options_validate_identity_and_derive_endpoints(
         version=1,
     )
     entry.add_to_hass(hass)
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.http_url_resolves_to_private_network",
+        lambda url: True,
+    )
     aioclient_mock.get(INFO_URL, json=_bridge_info())
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
+        user_input={"next_step_id": "media"},
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
         user_input={
             CONF_BRIDGE_STATUS_URL: BRIDGE_URL,
             CONF_BEARER_TOKEN: TOKEN,
+            CONF_ALLOW_INSECURE_HTTP: True,
         },
     )
 
     assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_STREAM_URL] == STREAM_URL
     assert result["data"][CONF_SNAPSHOT_URL] == f"{BRIDGE_URL}/snapshot.jpg"
+    assert result["data"][CONF_ALLOW_INSECURE_HTTP] is True
 
 
 async def test_media_options_reject_a_different_cradle(
     hass: HomeAssistant,
     aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -578,19 +607,409 @@ async def test_media_options_reject_a_different_cradle(
     )
     flow = CradlewiseOptionsFlow(entry)
     flow.hass = hass
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.http_url_resolves_to_private_network",
+        lambda url: True,
+    )
     aioclient_mock.get(
         INFO_URL,
         json=_bridge_info("00000000-0000-4000-8000-000000000099"),
     )
 
-    result = await flow.async_step_init(
+    result = await flow.async_step_media(
         {
             CONF_BRIDGE_STATUS_URL: BRIDGE_URL,
             CONF_BEARER_TOKEN: TOKEN,
+            CONF_ALLOW_INSECURE_HTTP: True,
         }
     )
 
     assert result["errors"] == {"base": "wrong_cradle"}
+
+
+async def test_media_options_require_confirmation_for_private_http(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    flow = CradlewiseOptionsFlow(entry)
+    flow.hass = hass
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.http_url_resolves_to_private_network",
+        lambda url: True,
+    )
+
+    result = await flow.async_step_media(
+        {CONF_BRIDGE_STATUS_URL: BRIDGE_URL, CONF_BEARER_TOKEN: TOKEN}
+    )
+
+    assert result["errors"] == {"base": "insecure_http_requires_confirmation"}
+
+
+async def test_media_options_reject_public_http_before_sending_token(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    flow = CradlewiseOptionsFlow(entry)
+    flow.hass = hass
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.http_url_resolves_to_private_network",
+        lambda url: False,
+    )
+
+    result = await flow.async_step_media(
+        {
+            CONF_BRIDGE_STATUS_URL: BRIDGE_URL,
+            CONF_BEARER_TOKEN: TOKEN,
+            CONF_ALLOW_INSECURE_HTTP: True,
+        }
+    )
+
+    assert result["errors"] == {"base": "insecure_public_http"}
+
+
+async def test_registration_cleanup_removes_only_current_device_and_entry(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data={
+            **_base_entry_data(),
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "stored-secret",
+        },
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    removed: list[list[str]] = []
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.authenticate",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.list_accounts",
+        lambda self: [_account()],
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.list_user_devices",
+        lambda self, account: [UserDevice(DEVICE_ID, "Pixel", "android", None)],
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.remove_user_devices",
+        lambda self, account, device_ids: removed.append(device_ids) or device_ids,
+    )
+
+    flow = CradlewiseOptionsFlow(entry)
+    flow.hass = hass
+    result = await flow.async_step_remove_registration(
+        {
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "",
+            CONF_CONFIRM_REGISTRATION_REMOVAL: True,
+        }
+    )
+
+    assert (
+        result["reason"],
+        removed,
+        hass.config_entries.async_get_entry(entry.entry_id),
+    ) == (
+        "registration_removed",
+        [[DEVICE_ID]],
+        None,
+    )
+
+
+async def test_registration_cleanup_refuses_an_unknown_device(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    flow = CradlewiseOptionsFlow(entry)
+    flow.hass = hass
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.authenticate",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.list_accounts",
+        lambda self: [_account()],
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.list_user_devices",
+        lambda self, account: [],
+    )
+
+    with pytest.raises(RegistrationNotFoundError):
+        flow._remove_registration("parent@example.com", "secret")
+
+
+async def test_registration_cleanup_requires_explicit_confirmation(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    flow = CradlewiseOptionsFlow(entry)
+    flow.hass = hass
+    remove_registration = Mock()
+    monkeypatch.setattr(flow, "_remove_registration", remove_registration)
+
+    result = await flow.async_step_remove_registration(
+        {
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "secret",
+            CONF_CONFIRM_REGISTRATION_REMOVAL: False,
+        }
+    )
+
+    assert (result["errors"], remove_registration.call_count) == (
+        {"base": "registration_removal_not_confirmed"},
+        0,
+    )
+
+
+async def test_invalid_client_certificate_creates_fixable_repair(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    entry.add_to_hass(hass)
+
+    async_update_client_certificate_issue(hass, entry)
+
+    issue = ir.async_get(hass).async_get_issue(
+        DOMAIN, f"client_certificate_{entry.entry_id}"
+    )
+    assert (issue.translation_key, issue.is_fixable, issue.severity) == (
+        "client_certificate_invalid",
+        True,
+        ir.IssueSeverity.ERROR,
+    )
+
+
+@pytest.mark.parametrize(
+    ("expires_in", "translation_key", "severity"),
+    [
+        (timedelta(minutes=-1), "client_certificate_expired", ir.IssueSeverity.ERROR),
+        (timedelta(days=10), "client_certificate_expiring", ir.IssueSeverity.WARNING),
+    ],
+)
+async def test_client_certificate_date_issues_are_classified(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    expires_in: timedelta,
+    translation_key: str,
+    severity: ir.IssueSeverity,
+) -> None:
+    current = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.client_certificate_validity",
+        lambda pem: (current - timedelta(days=1), current + expires_in),
+    )
+
+    async_update_client_certificate_issue(hass, entry, now=current)
+
+    issue = ir.async_get(hass).async_get_issue(
+        DOMAIN, f"client_certificate_{entry.entry_id}"
+    )
+    assert (issue.translation_key, issue.severity) == (translation_key, severity)
+
+
+async def test_healthy_client_certificate_clears_existing_repair(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    async_update_client_certificate_issue(hass, entry, now=current)
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.client_certificate_validity",
+        lambda pem: (current - timedelta(days=1), current + timedelta(days=365)),
+    )
+
+    async_update_client_certificate_issue(hass, entry, now=current)
+
+    assert (
+        ir.async_get(hass).async_get_issue(
+            DOMAIN, f"client_certificate_{entry.entry_id}"
+        )
+        is None
+    )
+
+
+async def test_certificate_repair_preserves_identity_and_can_remove_old_registration(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data={
+            **_base_entry_data(),
+            CONF_CONNECTION_MODE: CONNECTION_MODE_AUTOMATIC,
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "old-secret",
+        },
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    old_entry_id = entry.entry_id
+    replacement = ProvisionedCredentials(
+        device_id="replacement-device",
+        client_certificate="replacement certificate",
+        client_private_key="replacement private key",
+        group_ca_certificate="replacement group CA",
+    )
+    removed: list[list[str]] = []
+    _mock_cloud_setup(monkeypatch)
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.CloudAccountClient.provision_credentials",
+        lambda self, account, **kwargs: replacement,
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.CloudAccountClient.list_user_devices",
+        lambda self, account: [UserDevice(DEVICE_ID, "Pixel", "android", None)],
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.CloudAccountClient.remove_user_devices",
+        lambda self, account, device_ids: removed.append(device_ids) or device_ids,
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.client_certificate_validity",
+        lambda pem: (time_to_datetime(-60), time_to_datetime(3600)),
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs._pin_credentials",
+        lambda credentials, host: "replacement server CA",
+    )
+    schedule_reload = Mock()
+    monkeypatch.setattr(hass.config_entries, "async_schedule_reload", schedule_reload)
+    flow = ClientCertificateRepairFlow(entry)
+    flow.hass = hass
+
+    result = await flow.async_step_reprovision(
+        {
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "new-secret",
+            CONF_REMOVE_OLD_REGISTRATION: True,
+        }
+    )
+
+    assert (
+        result["type"],
+        entry.entry_id,
+        entry.unique_id,
+        entry.data[CONF_DEVICE_ID],
+        removed,
+    ) == (
+        data_entry_flow.FlowResultType.CREATE_ENTRY,
+        old_entry_id,
+        CRADLE_ID,
+        "replacement-device",
+        [[DEVICE_ID]],
+    )
+
+
+async def test_certificate_repair_rolls_back_registration_when_local_pin_fails(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    replacement = ProvisionedCredentials(
+        device_id="replacement-device",
+        client_certificate="replacement certificate",
+        client_private_key="replacement private key",
+        group_ca_certificate="replacement group CA",
+    )
+    removed: list[list[str]] = []
+    _mock_cloud_setup(monkeypatch)
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.CloudAccountClient.provision_credentials",
+        lambda self, account, **kwargs: replacement,
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.CloudAccountClient.remove_user_devices",
+        lambda self, account, device_ids: removed.append(device_ids) or device_ids,
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.client_certificate_validity",
+        lambda pem: (time_to_datetime(-60), time_to_datetime(3600)),
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs._pin_credentials",
+        Mock(side_effect=BrokerCertificateError("offline")),
+    )
+    flow = ClientCertificateRepairFlow(entry)
+    flow.hass = hass
+
+    result = await flow.async_step_reprovision(
+        {
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "secret",
+            CONF_REMOVE_OLD_REGISTRATION: False,
+        }
+    )
+
+    assert (result["errors"], removed, entry.data[CONF_DEVICE_ID]) == (
+        {"base": "cannot_connect_local"},
+        [["replacement-device"]],
+        DEVICE_ID,
+    )
 
 
 async def test_setup_with_media_creates_only_focused_entity_surface(

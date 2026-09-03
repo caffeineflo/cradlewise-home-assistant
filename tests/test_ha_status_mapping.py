@@ -1,4 +1,5 @@
 import importlib.util
+import socket
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -60,6 +61,36 @@ def test_health_url_replaces_any_supported_bridge_endpoint():
         config_helpers.health_url_from_status_url("http://bridge:8080/state"),
         config_helpers.health_url_from_status_url("http://bridge:8080/live"),
     } == {"http://bridge:8080/health"}
+
+
+def test_http_url_private_network_requires_every_resolved_address(monkeypatch):
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.8", 8080)),
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fd00::8", 8080, 0, 0)),
+        ],
+    )
+
+    assert config_helpers.http_url_resolves_to_private_network(
+        "http://bridge.test:8080"
+    )
+
+
+def test_http_url_private_network_rejects_any_public_address(monkeypatch):
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.8", 8080)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 8080)),
+        ],
+    )
+
+    assert not config_helpers.http_url_resolves_to_private_network(
+        "http://bridge.test:8080"
+    )
 
 
 def test_path_value_reads_nested_status_values():

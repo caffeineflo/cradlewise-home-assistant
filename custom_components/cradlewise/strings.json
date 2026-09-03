@@ -26,9 +26,19 @@
         "description": "Choose how Home Assistant should reach your crib. Automatic prefers your local network and falls back to Cradlewise cloud.",
         "data": {"connection_mode": "Connection mode"}
       },
-      "account": {
+      "account_automatic": {
         "title": "Cradlewise account",
-        "description": "Your account is used to discover the crib and provision its device certificate. Local-only setup does not retain these credentials.",
+        "description": "Your account is used to discover the crib and provision its device certificate. Automatic mode retains the email and password in Home Assistant's standard config-entry storage for cloud fallback. The integration does not add at-rest encryption.",
+        "data": {"email": "Email", "password": "Password"}
+      },
+      "account_local": {
+        "title": "Cradlewise account",
+        "description": "Your account is used to discover the crib and provision its device certificate. Local-only mode discards the email and password after setup, but retains the provisioned device private key in Home Assistant's standard config-entry storage.",
+        "data": {"email": "Email", "password": "Password"}
+      },
+      "account_cloud": {
+        "title": "Cradlewise account",
+        "description": "Your account is used to discover the crib and provision its device certificate. Cloud-only mode retains the email and password in Home Assistant's standard config-entry storage. The integration does not add at-rest encryption.",
         "data": {"email": "Email", "password": "Password"}
       },
       "select_cradle": {
@@ -52,22 +62,53 @@
     }
   },
   "options": {
+    "abort": {
+      "registration_removed": "The cloud device registration and this Home Assistant integration entry were removed"
+    },
     "error": {
       "cannot_connect": "Could not connect to the media companion",
+      "cleanup_cannot_connect": "Could not remove the Cradlewise cloud device registration",
+      "cleanup_invalid_auth": "Cradlewise rejected the account credentials",
+      "cleanup_wrong_cradle": "This account does not contain the configured crib",
+      "insecure_http_requires_confirmation": "Confirm that you accept unencrypted HTTP on this trusted private network",
+      "insecure_public_http": "Public or externally routed media companion addresses must use HTTPS",
       "invalid_auth": "The media companion rejected the bearer token",
       "invalid_bridge_response": "The media companion returned an invalid response",
       "invalid_bridge_status_url": "Use an http:// or https:// media companion URL",
+      "registration_not_found": "This integration's cloud device registration was not found",
+      "registration_removal_not_confirmed": "Confirm permanent removal before continuing",
       "unsupported_bridge": "Update the media companion before connecting it",
       "wrong_cradle": "The media companion belongs to a different crib"
     },
     "step": {
       "init": {
+        "title": "Configure Cradlewise",
+        "menu_options": {
+          "media": "Configure optional media companion",
+          "remove_registration": "Remove cloud registration and integration"
+        }
+      },
+      "media": {
         "title": "Optional media companion",
-        "description": "Add the separate media companion for live video, or leave the URL blank to use Home Assistant without video.",
-        "data": {"bridge_status_url": "Media companion URL", "bearer_token": "Bearer token"},
+        "description": "Add the separate media companion for live video, or leave the URL blank to use Home Assistant without video. HTTPS is required unless the address resolves only to a trusted private network and you explicitly accept unencrypted HTTP.",
+        "data": {
+          "bridge_status_url": "Media companion URL",
+          "bearer_token": "Bearer token",
+          "allow_insecure_http": "Allow unencrypted HTTP on my trusted private network"
+        },
         "data_description": {
-          "bridge_status_url": "The HTTP or HTTPS base address of the companion.",
-          "bearer_token": "Leave blank to keep the stored token."
+          "bridge_status_url": "The HTTPS base address of the companion, or an HTTP address restricted to your private network.",
+          "bearer_token": "Leave blank to keep the stored token.",
+          "allow_insecure_http": "HTTP exposes the bearer token and video snapshots to devices that can observe traffic on that network."
+        }
+      },
+      "remove_registration": {
+        "title": "Remove cloud registration and integration",
+        "description": "This permanently removes Cradlewise device registration `{device_id}` and then deletes this Home Assistant integration entry. Its entities will disappear. Apple Home names, rooms, favorites, automations, and scenes tied to them may be lost. The crib itself is not unpaired. Credentials entered here are used only for removal and are not newly stored.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "confirm_registration_removal": "I understand and want to permanently remove this registration and integration"
         }
       }
     }
@@ -78,6 +119,77 @@
         "automatic": "Automatic (local first, cloud fallback)",
         "local": "Local only",
         "cloud": "Cloud only"
+      }
+    }
+  },
+  "issues": {
+    "client_certificate_invalid": {
+      "title": "Cradlewise client certificate is invalid",
+      "fix_flow": {
+        "error": {
+          "cannot_connect": "Could not reprovision the certificate through Cradlewise cloud",
+          "cannot_connect_local": "The new certificate was provisioned, but the local crib broker could not be verified. The new registration was removed and the existing configuration was kept.",
+          "invalid_auth": "Cradlewise rejected the account credentials",
+          "invalid_certificate": "Cradlewise returned a certificate that is not currently valid",
+          "wrong_cradle": "This account does not contain the configured crib"
+        },
+        "step": {
+          "reprovision": {
+            "title": "Reprovision Cradlewise certificate",
+            "description": "The stored device certificate is missing, malformed, expired, not valid yet, or nearing expiration. Authenticate to create a replacement without changing the Home Assistant config entry, entity IDs, or device identity. Automatic and cloud-only modes retain the submitted email and password. Local-only mode discards them after repair. Optionally remove the previous cloud registration only after the replacement has been validated.",
+            "data": {
+              "email": "Email",
+              "password": "Password",
+              "remove_old_registration": "Remove the previous cloud device registration after successful repair"
+            }
+          }
+        }
+      }
+    },
+    "client_certificate_expired": {
+      "title": "Cradlewise client certificate expired at {expires_at}",
+      "fix_flow": {
+        "error": {
+          "cannot_connect": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::cannot_connect%]",
+          "cannot_connect_local": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::cannot_connect_local%]",
+          "invalid_auth": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::invalid_auth%]",
+          "invalid_certificate": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::invalid_certificate%]",
+          "wrong_cradle": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::wrong_cradle%]"
+        },
+        "step": {
+          "reprovision": {
+            "title": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::title%]",
+            "description": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::description%]",
+            "data": {
+              "email": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::email%]",
+              "password": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::password%]",
+              "remove_old_registration": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::remove_old_registration%]"
+            }
+          }
+        }
+      }
+    },
+    "client_certificate_expiring": {
+      "title": "Cradlewise client certificate expires at {expires_at}",
+      "fix_flow": {
+        "error": {
+          "cannot_connect": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::cannot_connect%]",
+          "cannot_connect_local": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::cannot_connect_local%]",
+          "invalid_auth": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::invalid_auth%]",
+          "invalid_certificate": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::invalid_certificate%]",
+          "wrong_cradle": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::wrong_cradle%]"
+        },
+        "step": {
+          "reprovision": {
+            "title": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::title%]",
+            "description": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::description%]",
+            "data": {
+              "email": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::email%]",
+              "password": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::password%]",
+              "remove_old_registration": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::remove_old_registration%]"
+            }
+          }
+        }
       }
     }
   },

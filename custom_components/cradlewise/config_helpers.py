@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 STATE_ENDPOINT = "state"
@@ -54,6 +56,34 @@ def is_rtsp_url(value: str) -> bool:
 def is_http_url(value: str) -> bool:
     """Return true when value is an HTTP(S) URL with a host."""
     return _parsed_url(value, {"http", "https"}) is not None
+
+
+def http_url_uses_tls(value: str) -> bool:
+    """Return true when a validated HTTP URL uses TLS."""
+    parsed = _parsed_url(value, {"http", "https"})
+    return parsed is not None and parsed.scheme == "https"
+
+
+def http_url_resolves_to_private_network(value: str) -> bool:
+    """Return whether every resolved address is private, loopback, or link-local."""
+    parsed = _parsed_url(value, {"http", "https"})
+    if parsed is None or parsed.hostname is None:
+        return False
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    addresses = {
+        ipaddress.ip_address(sockaddr[0])
+        for _, _, _, _, sockaddr in socket.getaddrinfo(
+            parsed.hostname,
+            port,
+            type=socket.SOCK_STREAM,
+        )
+    }
+    if not addresses:
+        raise OSError(f"{parsed.hostname} did not resolve to an address")
+    return all(
+        address.is_private or address.is_loopback or address.is_link_local
+        for address in addresses
+    )
 
 
 def snapshot_url_from_status_url(value: str) -> str:
