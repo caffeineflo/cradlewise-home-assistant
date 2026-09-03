@@ -37,6 +37,28 @@ Contributions that add subscription or paywall circumvention, cross-account
 access, firmware modification, safety-limit bypasses, or copied Cradlewise
 application or firmware code are out of scope.
 
+## Use at your own risk
+
+This project is unofficial and is not approved, endorsed, or supported by
+Cradlewise. Use it only with a crib and account you own or are authorized to
+access, and at your own discretion and risk.
+
+Cradlewise's [Terms of Service](https://cradlewise.com/legal/terms-of-service/)
+currently restrict reverse engineering, decompiling, and attempts to obtain
+non-public APIs. The terms also state that Cradlewise may restrict or suspend
+access to its platform if it determines that they have been violated. Terms,
+services, and enforcement may change, and the enforceability of particular
+restrictions may vary by jurisdiction. You are responsible for reviewing the
+terms and laws that apply to you.
+
+As of September 3, 2026, the maintainers are not aware of any account or crib
+being restricted specifically because this project was used. This is not a
+guarantee. Cradlewise may change or discontinue the cloud services,
+credentials, and protocols on which some connection modes depend. The project
+maintainers cannot restore an account or crib's access to Cradlewise services.
+This project does not provide legal advice. The software remains subject to the
+warranty and liability terms in the [MIT License](LICENSE).
+
 ## Status
 
 The supported release surface is intentionally small:
@@ -69,6 +91,15 @@ flow as the Android app. Local-only setup uses the account once for discovery
 and provisioning, then discards the email and password. Automatic and
 cloud-only modes retain them in the Home Assistant config entry so temporary
 AWS credentials can be renewed and the REST fallback can reauthenticate.
+
+Home Assistant stores retained account credentials and all provisioned device
+certificate material in its standard config-entry storage. This integration
+does not add application-level encryption; masking the password in the setup
+form only prevents it from being displayed while it is entered. Protect access
+to `/config`, Home Assistant backups, and administrator accounts. Local-only
+mode still retains the device private key required for authenticated local MQTT.
+If the optional media companion is configured, its bearer token and stream URL
+are stored in the same config entry's options.
 
 Cloud only applies to state and controls. If the optional media companion is
 configured, its local camera can remain available, but Home Assistant does not
@@ -135,9 +166,31 @@ After the repository is added:
 4. Sign in once so the integration can discover the crib and provision its
    device certificate.
 
-To add video later, open the integration's Configure action and enter the media
-companion URL and bearer token. Leaving the URL blank removes the camera and
-does not affect state, controls, device identity, or the other entities.
+The account step explains exactly which credentials the selected mode retains.
+Provisioning creates a device registration whose name follows the Android app's
+`model_random-id` shape instead of identifying Home Assistant. The integration
+stores the returned device ID and certificate material, not that display name.
+
+To add video later, open the integration's Configure action, select **Configure
+optional media companion**, and enter the companion URL and bearer token.
+HTTPS is required for any non-private destination. HTTP is accepted only when
+every resolved address is private, loopback, or link-local and you explicitly
+accept the plaintext trusted-LAN connection. Leaving the URL blank removes the
+camera and does not affect state, controls, device identity, or other entities.
+
+Home Assistant creates a Repair if the provisioned client certificate is
+missing, malformed, expired, not valid yet, or within 30 days of expiration.
+The repair provisions and validates a replacement without changing the config
+entry, integration device, or entity IDs. Removing the previous registration
+after successful repair is optional and off by default.
+
+Removing the integration normally leaves its provisioned device registration
+in the Cradlewise account. To remove both deliberately, open **Configure**,
+select **Remove cloud registration and integration**, review the Apple Home
+identity warning, and confirm. The action authenticates, verifies that the
+stored device ID belongs to the configured account and crib, removes exactly
+that registration, confirms the API response, and only then deletes the Home
+Assistant entry. It does not unpair or reset the crib.
 
 Another community integration already uses the `cradlewise` domain. Home
 Assistant cannot load two integrations with the same domain, so remove
