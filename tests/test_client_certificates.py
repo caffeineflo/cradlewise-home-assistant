@@ -7,7 +7,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from cradlewise_client.certificates import (
     BrokerCertificateError,
+    ClientCertificateError,
     _unverified_chain,
+    client_certificate_validity,
     fetch_server_chain,
     materialize_credentials,
     validate_server_chain,
@@ -62,6 +64,23 @@ def _chain(host: str = "192.0.2.10") -> list[bytes]:
         leaf.public_bytes(serialization.Encoding.DER),
         ca.public_bytes(serialization.Encoding.DER),
     ]
+
+
+def test_client_certificate_validity_returns_utc_window():
+    certificate = x509.load_der_x509_certificate(_chain()[0])
+    pem = certificate.public_bytes(serialization.Encoding.PEM).decode("ascii")
+
+    validity = client_certificate_validity(pem)
+
+    assert validity == (
+        certificate.not_valid_before_utc,
+        certificate.not_valid_after_utc,
+    )
+
+
+def test_client_certificate_validity_rejects_invalid_pem():
+    with pytest.raises(ClientCertificateError, match="not valid PEM"):
+        client_certificate_validity("not a certificate")
 
 
 def test_validate_server_chain_accepts_der_from_python_ssl():

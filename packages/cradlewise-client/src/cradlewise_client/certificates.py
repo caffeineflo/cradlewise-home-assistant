@@ -24,6 +24,21 @@ class BrokerCertificateError(RuntimeError):
     """Raised when the local broker chain cannot be safely pinned."""
 
 
+class ClientCertificateError(RuntimeError):
+    """Raised when provisioned client certificate material is invalid."""
+
+
+def client_certificate_validity(certificate_pem: str) -> tuple[datetime, datetime]:
+    """Return the UTC validity window for a provisioned client certificate."""
+    try:
+        certificate = x509.load_pem_x509_certificate(certificate_pem.encode("ascii"))
+    except (UnicodeEncodeError, ValueError) as exc:
+        raise ClientCertificateError(
+            "provisioned client certificate is not valid PEM"
+        ) from exc
+    return certificate.not_valid_before_utc, certificate.not_valid_after_utc
+
+
 def fetch_server_chain(
     host: str,
     client_certificate_path: Path,

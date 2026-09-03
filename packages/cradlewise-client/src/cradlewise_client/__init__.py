@@ -2,6 +2,8 @@
 
 from .certificates import (
     BrokerCertificateError,
+    ClientCertificateError,
+    client_certificate_validity,
     materialize_credentials,
     pin_server_ca,
     validate_server_chain,
@@ -13,6 +15,7 @@ from .cloud import (
     CloudProvisioningError,
     CradleAccount,
     ProvisionedCredentials,
+    UserDevice,
 )
 from .commands import (
     CommandError,
@@ -38,6 +41,7 @@ __all__ = [
     "CloudAuthenticationError",
     "CloudProvisioningError",
     "BrokerCertificateError",
+    "ClientCertificateError",
     "CradleAccount",
     "CradlewiseCommandHandler",
     "LocalConnectionError",
@@ -47,9 +51,11 @@ __all__ = [
     "REMOTE_MQTT_ENDPOINT",
     "RemoteCradleClient",
     "ProvisionedCredentials",
+    "UserDevice",
     "CradlewiseStateStore",
     "normalize_device_state",
     "materialize_credentials",
+    "client_certificate_validity",
     "pin_server_ca",
     "build_desired",
     "shadow_payload",

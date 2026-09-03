@@ -97,6 +97,11 @@ Response contains `device_config`:
 | `cradle_id` | Cradle UUID |
 | `device_id` | Device UUID (used as MQTT client ID) |
 
+The Android app identifies a registration as `Build.MODEL + "_" + Android ID`.
+The Home Assistant client preserves that backend-compatible shape with a
+randomly selected Android model identifier and random 16-character ID. It does
+not expose a fixed `Home Assistant` device name in the Cradlewise device list.
+
 ## Step 5: Download Certs from S3
 
 The S3 keys follow the pattern `{cradleId}/android/{deviceUuid}.pem`. Two
@@ -128,6 +133,29 @@ its FCM push token and phone/network metadata. The Home Assistant client does
 not need mobile push notifications and intentionally skips this call. MQTT
 authorization comes from `pairedUsers/v3`, and both local and AWS IoT
 connections have been verified without uploading the extra device telemetry.
+
+## Device Registration Cleanup
+
+The Android app lists registrations with:
+
+```text
+GET /prod-latest/babyProfiles/{babyId}/userDevices?email_id={email}
+```
+
+It removes selected registrations with:
+
+```http
+POST /prod-latest/babyProfiles/{babyId}/userDevices/remove
+Content-Type: application/json
+
+{"device_ids":["device-uuid"]}
+```
+
+The response is `{"removed_devices":["device-uuid"]}`. The Home Assistant
+cleanup flow first verifies that its stored device ID is present in the
+authenticated user's list, posts only that ID, and requires the response to
+confirm the same ID. Cleanup is never performed during a normal integration
+removal or certificate repair unless the user explicitly selects it.
 
 ## Certificate Details
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import secrets
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -27,6 +28,13 @@ REGION = "us-east-1"
 API_ENDPOINT = "https://backend.cradlewise.com/prod-latest"
 S3_BUCKET = "cradlewise-device-certs"
 REQUEST_TIMEOUT_SECONDS = 10
+ANDROID_DEVICE_MODELS = (
+    "Pixel 8",
+    "Pixel 8a",
+    "SM-S921U1",
+    "SM-S926U1",
+    "CPH2583",
+)
 
 
 class CloudAuthenticationError(RuntimeError):
@@ -58,6 +66,16 @@ class ProvisionedCredentials:
     client_certificate: str
     client_private_key: str
     group_ca_certificate: str
+
+
+@dataclass(frozen=True)
+class UserDevice:
+    """One device registration associated with the authenticated account."""
+
+    device_id: str
+    device_name: str | None
+    os: str | None
+    model: str | None
 
 
 def sign_request(
@@ -246,7 +264,7 @@ class CloudAccountClient:
                     "app_version": app_version,
                     "country": country,
                     "os": "android",
-                    "device_name": "Home Assistant",
+                    "device_name": _android_device_name(),
                     "os_version": "14",
                     "timezone": timezone,
                     "type": "phone",
@@ -317,6 +335,70 @@ class CloudAccountClient:
             client_private_key=private_key,
             group_ca_certificate=group_ca,
         )
+
+    def list_user_devices(self, account: CradleAccount) -> list[UserDevice]:
+        """List this account's device registrations for one baby profile."""
+        payload = self._request_json(
+            "GET",
+            (
+                f"{API_ENDPOINT}/babyProfiles/{account.baby_id}/userDevices"
+                f"?email_id={quote(self.email)}"
+            ),
+        )
+        user_devices = payload.get("user_devices")
+        if not isinstance(user_devices, list):
+            raise CloudApiError("Cradlewise user devices response has no device list")
+
+        result = []
+        for user in user_devices:
+            if not isinstance(user, dict):
+                continue
+            email = user.get("email_id")
+            if not isinstance(email, str) or email.casefold() != self.email.casefold():
+                continue
+            devices = user.get("devices")
+            if not isinstance(devices, list):
+                continue
+            for device in devices:
+                if not isinstance(device, dict):
+                    continue
+                device_id = device.get("device_id")
+                if not isinstance(device_id, str) or not device_id.strip():
+                    continue
+                result.append(
+                    UserDevice(
+                        device_id=device_id.strip(),
+                        device_name=_optional_string(device.get("device_name")),
+                        os=_optional_string(device.get("os")),
+                        model=_optional_string(device.get("model")),
+                    )
+                )
+        return result
+
+    def remove_user_devices(
+        self,
+        account: CradleAccount,
+        device_ids: list[str],
+    ) -> list[str]:
+        """Remove exact device registrations and return confirmed removals."""
+        requested = [device_id.strip() for device_id in device_ids if device_id.strip()]
+        if not requested:
+            raise CloudApiError("at least one device registration is required")
+        body = json.dumps({"device_ids": requested}, separators=(",", ":"))
+        payload = self._request_json(
+            "POST",
+            f"{API_ENDPOINT}/babyProfiles/{account.baby_id}/userDevices/remove",
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+        removed = payload.get("removed_devices")
+        if not isinstance(removed, list) or not all(
+            isinstance(device_id, str) for device_id in removed
+        ):
+            raise CloudApiError(
+                "Cradlewise remove devices response has no confirmed device list"
+            )
+        return [device_id.strip() for device_id in removed if device_id.strip()]
 
     def _request_json(
         self,
@@ -419,3 +501,12 @@ def _local_ip(payload: dict[str, Any]) -> str | None:
         else None
     )
     return address.strip() if isinstance(address, str) and address.strip() else None
+
+
+def _optional_string(value: object) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _android_device_name() -> str:
+    """Return the model-and-ID shape used by the Android application."""
+    return f"{secrets.choice(ANDROID_DEVICE_MODELS)}_{secrets.token_hex(8)}"
