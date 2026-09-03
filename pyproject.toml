@@ -14,7 +14,7 @@ dependencies = [
 test = [
   "pytest>=8.0.0",
   "pytest-asyncio==1.4.0",
-  "ruff==0.16.4",
+  "ruff==0.16.5",
   "yamllint==1.38.0",
 ]
 ha-test = [
