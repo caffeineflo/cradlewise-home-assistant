@@ -7,6 +7,25 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Home Assistant Repairs for missing, invalid, expired, and soon-to-expire
+  provisioned client certificates, with in-place reprovisioning.
+- An explicit cloud-registration cleanup action that verifies and removes only
+  the current integration's device ID before deleting its config entry.
+
+### Changed
+
+- Explain credential retention and private-key storage for the selected
+  connection mode directly in the setup flow.
+- Register new certificate clients with randomized Android-style device names
+  instead of an identifying Home Assistant label.
+
+### Security
+
+- Require HTTPS for non-private media companion destinations and explicit
+  consent before accepting HTTP on a private network.
+
 ## [0.1.0] - 2026-08-29
 
 ### Added

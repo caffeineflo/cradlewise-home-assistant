@@ -203,6 +203,9 @@ polls only authenticated `/health` for camera availability.
 Add or remove video through the integration's Configure action. The companion
 URL is optional and its `/info` response supplies the stable cradle ID and
 RTSP(S) reader URL. The integration rejects a companion for another cradle.
+Non-private companion destinations require HTTPS. Plain HTTP is accepted only
+when every resolved address is private, loopback, or link-local and the user
+explicitly accepts the trusted-LAN exposure of the bearer token and snapshots.
 
 If using Home Assistant's YAML `ffmpeg` camera platform directly, force RTSP
 over TCP. The default UDP pull produced intermittent `camera_proxy` 500s during
@@ -226,6 +229,19 @@ the existing Greengrass CA is confirmed. Automatic rediscovery never replaces
 a different pinned CA. Reconfigure explicitly revalidates and trusts the
 broker's current core CA, including a firmware-driven CA change at the same
 address. Do not edit Home Assistant storage files.
+
+Home Assistant raises a Repair when the stored client certificate is missing,
+invalid, expired, not valid yet, or expires within 30 days. Reprovisioning
+keeps the config entry, device identity, unique ID, and entity IDs unchanged.
+If local broker validation fails, the newly created registration is removed
+and the existing configuration is kept. Removing the prior registration after
+a successful repair is an explicit opt-in.
+
+Normal config-entry removal does not call the Cradlewise cloud. The Configure
+menu has a separate destructive action that verifies the stored device ID in
+the authenticated account, removes exactly that registration, confirms the
+response, and then removes the Home Assistant entry. Its confirmation warns
+that deleting the entities can also discard Apple Home metadata tied to them.
 
 ### Entity Surface
 
