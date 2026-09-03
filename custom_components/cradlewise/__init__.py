@@ -9,10 +9,12 @@ from typing import TypeAlias
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 
-from .const import CONF_STREAM_URL
+from .const import CLIENT_CERTIFICATE_ISSUE_PREFIX, CONF_STREAM_URL, DOMAIN
 from .coordinator import CradlewiseCoordinator
+from .repairs import async_update_client_certificate_issue
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +52,7 @@ async def async_setup_entry(
     entry: CradlewiseConfigEntry,
 ) -> bool:
     """Set up Cradlewise from a config entry."""
+    async_update_client_certificate_issue(hass, entry)
     config = {**entry.data, **entry.options}
     if config.get(CONF_STREAM_URL):
         if not await async_setup_component(hass, "ffmpeg", {}):
@@ -79,6 +82,18 @@ async def async_unload_entry(
     if unloaded:
         await entry.runtime_data.coordinator.async_stop()
     return unloaded
+
+
+async def async_remove_entry(
+    hass: HomeAssistant,
+    entry: CradlewiseConfigEntry,
+) -> None:
+    """Remove the certificate issue without changing cloud registration."""
+    ir.async_delete_issue(
+        hass,
+        DOMAIN,
+        f"{CLIENT_CERTIFICATE_ISSUE_PREFIX}_{entry.entry_id}",
+    )
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
