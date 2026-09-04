@@ -293,47 +293,67 @@ class CloudAccountClient:
             )
         group_ca = device_config.get("group_ca_cert")
         object_keys = device_config.get("s3_object_keys")
-        if not isinstance(group_ca, str) or not group_ca.strip():
-            raise CloudProvisioningError(
-                "Cradlewise certificate response has no group CA"
-            )
-        if not isinstance(object_keys, list) or not object_keys:
-            raise CloudProvisioningError(
-                "Cradlewise certificate response has no certificate objects"
-            )
-
-        raw = self._require_raw_credentials()
-        s3 = boto3.client(
-            "s3",
-            region_name=REGION,
-            aws_access_key_id=raw["AccessKeyId"],
-            aws_secret_access_key=raw["SecretKey"],
-            aws_session_token=raw["SessionToken"],
-        )
-        pem_objects = [self._download_s3_text(s3, str(key)) for key in object_keys]
-        client_certificate = next(
-            (value for value in pem_objects if "BEGIN CERTIFICATE" in value),
-            None,
-        )
-        private_key = next(
-            (value for value in pem_objects if "PRIVATE KEY" in value),
-            None,
-        )
-        if client_certificate is None or private_key is None:
-            raise CloudProvisioningError(
-                "Cradlewise certificate objects did not contain a certificate and key"
-            )
-
         device_id = device_config.get("device_id")
         if not isinstance(device_id, str) or not device_id.strip():
+            if not isinstance(object_keys, list) or not object_keys:
+                raise CloudProvisioningError(
+                    "Cradlewise certificate response has no device identity"
+                )
             first_key = str(object_keys[0])
             device_id = first_key.rsplit("/", 1)[-1].removesuffix(".pem")
         if not device_id:
             raise CloudProvisioningError(
                 "Cradlewise certificate response has no device identity"
             )
+        device_id = device_id.strip()
+
+        try:
+            if not isinstance(group_ca, str) or not group_ca.strip():
+                raise CloudProvisioningError(
+                    "Cradlewise certificate response has no group CA"
+                )
+            if not isinstance(object_keys, list) or not object_keys:
+                raise CloudProvisioningError(
+                    "Cradlewise certificate response has no certificate objects"
+                )
+            raw = self._require_raw_credentials()
+            s3 = boto3.client(
+                "s3",
+                region_name=REGION,
+                aws_access_key_id=raw["AccessKeyId"],
+                aws_secret_access_key=raw["SecretKey"],
+                aws_session_token=raw["SessionToken"],
+            )
+            pem_objects = [self._download_s3_text(s3, str(key)) for key in object_keys]
+            client_certificate = next(
+                (value for value in pem_objects if "BEGIN CERTIFICATE" in value),
+                None,
+            )
+            private_key = next(
+                (value for value in pem_objects if "PRIVATE KEY" in value),
+                None,
+            )
+            if client_certificate is None or private_key is None:
+                raise CloudProvisioningError(
+                    "Cradlewise certificate objects did not contain a certificate "
+                    "and key"
+                )
+        except (CloudAuthenticationError, CloudProvisioningError) as exc:
+            try:
+                removed = self.remove_user_devices(account, [device_id])
+            except (CloudApiError, CloudAuthenticationError) as cleanup_exc:
+                raise CloudProvisioningError(
+                    "certificate provisioning failed and its new registration "
+                    f"could not be removed: {cleanup_exc}"
+                ) from exc
+            if removed != [device_id]:
+                raise CloudProvisioningError(
+                    "certificate provisioning failed and Cradlewise did not "
+                    "confirm removal of its new registration"
+                ) from exc
+            raise
         return ProvisionedCredentials(
-            device_id=device_id.strip(),
+            device_id=device_id,
             client_certificate=client_certificate,
             client_private_key=private_key,
             group_ca_certificate=group_ca,
@@ -422,6 +442,10 @@ class CloudAccountClient:
                 credentials,
                 body=body,
                 headers=headers,
+            )
+        if response.status_code in {401, 403}:
+            raise CloudAuthenticationError(
+                "Cradlewise account authentication was rejected"
             )
         try:
             response.raise_for_status()

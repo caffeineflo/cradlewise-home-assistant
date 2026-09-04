@@ -88,6 +88,26 @@ def test_cloud_request_reauthenticates_once_on_forbidden(monkeypatch):
     assert (state, len(auth_calls)) == ({"babyPresent": True}, 1)
 
 
+def test_cloud_request_reports_persistent_forbidden_as_invalid_auth(monkeypatch):
+    session = FakeSession([FakeResponse(403, {}), FakeResponse(403, {})])
+    client = _authenticated(
+        CloudAccountClient(email="user@example.com", password="secret", session=session)
+    )
+    auth_calls = []
+
+    def authenticate():
+        auth_calls.append(True)
+        client._credentials = "refreshed-credentials"
+
+    monkeypatch.setattr(client, "authenticate", authenticate)
+    monkeypatch.setattr(cloud, "sign_request", lambda *args, **kwargs: {})
+
+    with pytest.raises(cloud.CloudAuthenticationError):
+        client.get_cradle_state("crib-1")
+
+    assert len(auth_calls) == 1
+
+
 @pytest.mark.parametrize(
     "error",
     [
@@ -187,6 +207,46 @@ def test_provisioning_classifies_certificate_objects(monkeypatch):
     assert registration["device"]["device_name"].startswith(cloud.ANDROID_DEVICE_MODELS)
     assert len(registration["device"]["device_name"].rsplit("_", 1)[1]) == 16
     assert registration["fcm_token"] == ""
+
+
+def test_provisioning_removes_registration_when_certificate_download_fails(
+    monkeypatch,
+):
+    session = FakeSession(
+        [
+            FakeResponse(
+                200,
+                {
+                    "device_config": {
+                        "device_id": "device-1",
+                        "group_ca_cert": "-----BEGIN CERTIFICATE-----\nca",
+                        "s3_object_keys": ["crib/cert.pem"],
+                    }
+                },
+            ),
+            FakeResponse(200, {"removed_devices": ["device-1"]}),
+        ]
+    )
+    client = _authenticated(
+        CloudAccountClient(email="user@example.com", password="secret", session=session)
+    )
+
+    def fail_download(s3, key):
+        raise cloud.CloudProvisioningError("certificate download failed")
+
+    monkeypatch.setattr(cloud, "sign_request", lambda *args, **kwargs: {})
+    monkeypatch.setattr(cloud.boto3, "client", lambda *args, **kwargs: object())
+    monkeypatch.setattr(client, "_download_s3_text", fail_download)
+
+    with pytest.raises(cloud.CloudProvisioningError, match="download failed"):
+        client.provision_credentials(
+            CradleAccount(baby_id=4, cradle_id="crib-1", name="A")
+        )
+
+    assert (session.requests[1][0], session.requests[1][3]) == (
+        "POST",
+        '{"device_ids":["device-1"]}',
+    )
 
 
 def test_list_user_devices_returns_only_authenticated_users_devices(monkeypatch):
