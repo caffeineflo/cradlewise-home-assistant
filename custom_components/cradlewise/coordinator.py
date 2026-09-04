@@ -230,7 +230,7 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._credential_directory: Path | None = None
         self._bridge_snapshot: dict[str, Any] | None = None
         self._bridge_command_available = False
-        self._last_cloud_poll = 0.0
+        self._last_cloud_poll: float | None = None
         self._last_start_attempt: dict[str, float] = {}
         self._bearer_token = config.get(CONF_BEARER_TOKEN)
         self._state_url = build_state_url(bridge_url) if uses_bridge_state else None
@@ -541,6 +541,8 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return snapshot
 
     def _cloud_poll_due(self) -> bool:
+        if self._last_cloud_poll is None:
+            return True
         connected = self._cloud_client is not None and self._cloud_client.connected
         interval = (
             CLOUD_POLL_CONNECTED_SECONDS
