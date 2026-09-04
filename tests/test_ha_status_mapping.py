@@ -93,6 +93,12 @@ def test_http_url_private_network_rejects_any_public_address(monkeypatch):
     )
 
 
+def test_media_urls_reject_literal_whitespace_and_control_characters():
+    assert not config_helpers.is_rtsp_url("rtsp://bridge.test/live stream")
+    assert not config_helpers.is_http_url("https://bridge.test/state\n")
+    assert not config_helpers.is_http_url("https://bridge.test/state\x7f")
+
+
 def test_path_value_reads_nested_status_values():
     payload = {
         "bridge": {"healthy": True},

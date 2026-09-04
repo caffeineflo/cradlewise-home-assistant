@@ -25,9 +25,10 @@ from homeassistant.components.repairs import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import selector
+from homeassistant.helpers.event import async_track_point_in_utc_time
 
 from .config_flow import _credential_data, _pin_credentials
 from .const import (
@@ -55,12 +56,13 @@ def async_update_client_certificate_issue(
     entry: ConfigEntry,
     *,
     now: datetime | None = None,
-) -> None:
+) -> datetime | None:
     """Create, update, or clear the client certificate repair issue."""
     current = now or datetime.now(timezone.utc)
     certificate_pem = entry.data.get(CONF_CLIENT_CERTIFICATE)
     translation_key: str | None = None
     placeholders: dict[str, str] | None = None
+    next_update: datetime | None = None
     try:
         if not isinstance(certificate_pem, str):
             raise ClientCertificateError("client certificate is missing")
@@ -72,29 +74,62 @@ def async_update_client_certificate_issue(
         if current < not_before:
             translation_key = "client_certificate_invalid"
             placeholders = None
+            next_update = not_before
         elif current >= not_after:
             translation_key = "client_certificate_expired"
-        elif not_after <= current + timedelta(days=CLIENT_CERTIFICATE_WARNING_DAYS):
+        elif current >= not_after - timedelta(days=CLIENT_CERTIFICATE_WARNING_DAYS):
             translation_key = "client_certificate_expiring"
+            next_update = not_after
+        else:
+            next_update = not_after - timedelta(days=CLIENT_CERTIFICATE_WARNING_DAYS)
 
     issue_id = _issue_id(entry)
     if translation_key is None:
         ir.async_delete_issue(hass, DOMAIN, issue_id)
-        return
-    ir.async_create_issue(
-        hass,
-        DOMAIN,
-        issue_id,
-        data={"entry_id": entry.entry_id},
-        is_fixable=True,
-        severity=(
-            ir.IssueSeverity.WARNING
-            if translation_key == "client_certificate_expiring"
-            else ir.IssueSeverity.ERROR
-        ),
-        translation_key=translation_key,
-        translation_placeholders=placeholders,
-    )
+    else:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            data={"entry_id": entry.entry_id},
+            is_fixable=True,
+            severity=(
+                ir.IssueSeverity.WARNING
+                if translation_key == "client_certificate_expiring"
+                else ir.IssueSeverity.ERROR
+            ),
+            translation_key=translation_key,
+            translation_placeholders=placeholders,
+        )
+    return next_update
+
+
+def async_schedule_client_certificate_issue_updates(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> CALLBACK_TYPE:
+    """Update certificate repairs at each validity boundary."""
+    cancel_scheduled_update: CALLBACK_TYPE | None = None
+
+    @callback
+    def update_issue(now: datetime | None = None) -> None:
+        nonlocal cancel_scheduled_update
+        next_update = async_update_client_certificate_issue(hass, entry, now=now)
+        cancel_scheduled_update = (
+            async_track_point_in_utc_time(hass, update_issue, next_update)
+            if next_update is not None
+            else None
+        )
+
+    @callback
+    def cancel_updates() -> None:
+        nonlocal cancel_scheduled_update
+        if cancel_scheduled_update is not None:
+            cancel_scheduled_update()
+            cancel_scheduled_update = None
+
+    update_issue()
+    return cancel_updates
 
 
 def _repair_schema(email: str) -> vol.Schema:
@@ -177,7 +212,6 @@ class ClientCertificateRepairFlow(RepairsFlow):
                         DOMAIN,
                         _issue_id(self._entry),
                     )
-                    self.hass.config_entries.async_schedule_reload(self._entry.entry_id)
                     return self.async_create_entry(data={})
 
         return self.async_show_form(

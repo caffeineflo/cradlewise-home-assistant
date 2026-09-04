@@ -11,7 +11,7 @@ from cradlewise_client.cloud import CLIENT_SECRET
 try:
     from homeassistant import config_entries, data_entry_flow
     from homeassistant.config_entries import ConfigEntryState
-    from homeassistant.const import CONF_EMAIL, CONF_NAME, CONF_PASSWORD
+    from homeassistant.const import CONF_EMAIL, CONF_NAME, CONF_PASSWORD, Platform
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers import entity_registry as er
     from homeassistant.helpers import issue_registry as ir
@@ -25,6 +25,8 @@ except ModuleNotFoundError:
 from cradlewise_client.certificates import BrokerCertificateError
 from cradlewise_client.cloud import CradleAccount, ProvisionedCredentials, UserDevice
 
+from custom_components.cradlewise import BASE_PLATFORMS
+from custom_components.cradlewise.camera import CradlewiseBridgeCamera
 from custom_components.cradlewise.config_flow import (
     CradlewiseOptionsFlow,
     RegistrationNotFoundError,
@@ -294,6 +296,81 @@ async def test_automatic_setup_continues_when_the_local_broker_is_offline(
     assert result["data"][CONF_EMAIL] == "parent@example.com"
     assert CONF_LOCAL_HOST not in result["data"]
     assert CONF_SERVER_CA_CERTIFICATE not in result["data"]
+
+
+async def test_automatic_setup_continues_when_local_discovery_fails(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_cloud_setup(monkeypatch)
+
+    def fail_local_discovery(self: object, cradle_id: str) -> None:
+        raise OSError("local discovery unavailable")
+
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.get_cradle_ip",
+        fail_local_discovery,
+    )
+
+    result = await _start_account_flow(hass, CONNECTION_MODE_AUTOMATIC)
+
+    assert (
+        result["type"],
+        result["data"][CONF_CONNECTION_MODE],
+        result["data"][CONF_EMAIL],
+        CONF_LOCAL_HOST in result["data"],
+    ) == (
+        data_entry_flow.FlowResultType.CREATE_ENTRY,
+        CONNECTION_MODE_AUTOMATIC,
+        "parent@example.com",
+        False,
+    )
+
+
+async def test_local_only_setup_removes_registration_when_discovery_fails(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_cloud_setup(monkeypatch)
+    removed: list[list[str]] = []
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.get_cradle_ip",
+        lambda self, cradle_id: None,
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.remove_user_devices",
+        lambda self, account, device_ids: removed.append(device_ids) or device_ids,
+    )
+
+    result = await _start_account_flow(hass, CONNECTION_MODE_LOCAL)
+
+    assert (result["type"], result["reason"], removed) == (
+        data_entry_flow.FlowResultType.ABORT,
+        "cannot_find_device",
+        [[DEVICE_ID]],
+    )
+
+
+async def test_local_only_setup_reports_registration_cleanup_failure(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_cloud_setup(monkeypatch)
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.get_cradle_ip",
+        lambda self, cradle_id: None,
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.remove_user_devices",
+        lambda self, account, device_ids: [],
+    )
+
+    result = await _start_account_flow(hass, CONNECTION_MODE_LOCAL)
+
+    assert (result["type"], result["reason"]) == (
+        data_entry_flow.FlowResultType.ABORT,
+        "registration_cleanup_failed",
+    )
 
 
 async def test_automatic_setup_reports_cloud_provisioning_io_failure(
@@ -876,13 +953,16 @@ async def test_healthy_client_certificate_clears_existing_repair(
         lambda pem: (current - timedelta(days=1), current + timedelta(days=365)),
     )
 
-    async_update_client_certificate_issue(hass, entry, now=current)
+    next_update = async_update_client_certificate_issue(hass, entry, now=current)
 
     assert (
         ir.async_get(hass).async_get_issue(
             DOMAIN, f"client_certificate_{entry.entry_id}"
-        )
-        is None
+        ),
+        next_update,
+    ) == (
+        None,
+        current + timedelta(days=335),
     )
 
 
@@ -958,6 +1038,7 @@ async def test_certificate_repair_preserves_identity_and_can_remove_old_registra
         "replacement-device",
         [[DEVICE_ID]],
     )
+    assert schedule_reload.call_count == 0
 
 
 async def test_certificate_repair_rolls_back_registration_when_local_pin_fails(
@@ -1068,6 +1149,29 @@ async def test_setup_without_media_creates_no_camera(
     entries = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     assert len(entries) == 30
     assert all(item.domain != "camera" for item in entries)
+    assert entry.runtime_data.platforms == BASE_PLATFORMS
+    assert Platform.CAMERA not in entry.runtime_data.platforms
+
+
+async def test_camera_quotes_rtsp_url_for_ffmpeg(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data={
+            **_bridge_entry_data(),
+            CONF_STREAM_URL: "rtsp://reader:p@ss@bridge.test:8560/cradlewise?x=one&y=two",
+        },
+        version=1,
+    )
+    camera = CradlewiseBridgeCamera(entry, CradlewiseCoordinator(hass, entry))
+
+    assert camera._ffmpeg_input() == (
+        "-rtsp_transport tcp -i "
+        "'rtsp://reader:p@ss@bridge.test:8560/cradlewise?x=one&y=two'"
+    )
 
 
 async def test_diagnostics_redact_all_credentials(

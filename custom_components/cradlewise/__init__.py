@@ -14,7 +14,7 @@ from homeassistant.setup import async_setup_component
 
 from .const import CLIENT_CERTIFICATE_ISSUE_PREFIX, CONF_STREAM_URL, DOMAIN
 from .coordinator import CradlewiseCoordinator
-from .repairs import async_update_client_certificate_issue
+from .repairs import async_schedule_client_certificate_issue_updates
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,14 +27,13 @@ async def _async_reload_entry(
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-PLATFORMS: list[Platform] = [
+BASE_PLATFORMS: tuple[Platform, ...] = (
     Platform.BINARY_SENSOR,
-    Platform.CAMERA,
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
-]
+)
 
 
 @dataclass
@@ -42,6 +41,7 @@ class CradlewiseRuntimeData:
     """Objects owned by one Cradlewise config entry."""
 
     coordinator: CradlewiseCoordinator
+    platforms: tuple[Platform, ...]
 
 
 CradlewiseConfigEntry: TypeAlias = ConfigEntry[CradlewiseRuntimeData]
@@ -52,9 +52,11 @@ async def async_setup_entry(
     entry: CradlewiseConfigEntry,
 ) -> bool:
     """Set up Cradlewise from a config entry."""
-    async_update_client_certificate_issue(hass, entry)
+    entry.async_on_unload(async_schedule_client_certificate_issue_updates(hass, entry))
     config = {**entry.data, **entry.options}
+    platforms = BASE_PLATFORMS
     if config.get(CONF_STREAM_URL):
+        platforms += (Platform.CAMERA,)
         if not await async_setup_component(hass, "ffmpeg", {}):
             return False
         if not await async_setup_component(hass, "stream", {}):
@@ -66,10 +68,13 @@ async def async_setup_entry(
     except BaseException:
         await coordinator.async_stop()
         raise
-    entry.runtime_data = CradlewiseRuntimeData(coordinator=coordinator)
+    entry.runtime_data = CradlewiseRuntimeData(
+        coordinator=coordinator,
+        platforms=platforms,
+    )
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, platforms)
     return True
 
 
@@ -78,7 +83,10 @@ async def async_unload_entry(
     entry: CradlewiseConfigEntry,
 ) -> bool:
     """Unload a Cradlewise config entry."""
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(
+        entry,
+        entry.runtime_data.platforms,
+    )
     if unloaded:
         await entry.runtime_data.coordinator.async_stop()
     return unloaded
