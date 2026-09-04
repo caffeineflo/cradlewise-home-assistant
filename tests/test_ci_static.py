@@ -82,7 +82,7 @@ def test_dependabot_updates_the_uv_lockfile():
 def test_ci_jobs_have_explicit_timeouts():
     workflow = Path(".github/workflows/tests.yml").read_text()
 
-    assert workflow.count("    timeout-minutes:") == 6
+    assert workflow.count("    timeout-minutes:") == 7
 
 
 def test_ci_blocks_new_high_severity_dependency_vulnerabilities():
@@ -211,6 +211,7 @@ def test_ci_and_release_test_supported_and_current_home_assistant():
     assert workflows.count('home-assistant-version: "2026.8.0"') == 2
     assert workflows.count('home-assistant-version: "2026.9.0"') == 2
     assert workflows.count("Verify state-only imports without media dependencies") == 2
+    assert workflows.count("needs: home-assistant-versions") == 2
 
 
 def test_hacs_validation_activates_when_repository_is_public():

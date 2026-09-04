@@ -87,7 +87,7 @@ jobs:
           -d '{extends: default, rules: {document-start: disable, line-length: disable,
           truthy: disable}}' .github examples
 
-  home-assistant-test:
+  home-assistant-versions:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -159,6 +159,17 @@ jobs:
         run: >-
           .ha-test/bin/python -m pytest
           tests/test_ha_integration.py tests/test_ha_coordinator.py
+
+  home-assistant-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: home-assistant-versions
+    permissions:
+      contents: read
+
+    steps:
+      - name: Confirm supported Home Assistant versions passed
+        run: echo "All Home Assistant version checks passed"
 
   home-assistant-validation:
     runs-on: ubuntu-latest
