@@ -7,6 +7,37 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-04
+
+### Added
+
+- Test the Home Assistant integration against both the declared 2026.8.0
+  minimum and the current 2026.9.0 release, including a state-only import with
+  no optional media dependencies installed.
+- Document the repeatable maintainer-run live crib release gate and exact
+  Home Assistant entity surface.
+
+### Changed
+
+- Use obvious `your_crib` placeholders in the wake recorder example because
+  Home Assistant derives entity IDs from each user's crib name.
+- Recheck provisioned client certificates at their warning and expiration
+  boundaries instead of only when the integration is loaded.
+
+### Fixed
+
+- Load and unload the optional camera platform only when media is configured,
+  so state-only HACS installations do not import FFmpeg, stream, or TurboJPEG.
+- Reload a successfully repaired entry only through its update listener.
+- Preserve cloud authentication failures after a rejected credential refresh
+  so Home Assistant starts reauthentication instead of reporting a generic API
+  outage.
+- Continue Automatic setup with cloud connectivity when local discovery or
+  broker verification fails, and roll back new registrations when Local-only
+  setup or certificate download fails.
+- Quote RTSP inputs passed to FFmpeg and reject URLs containing literal
+  whitespace or control characters.
+
 ## [0.2.0] - 2026-09-04
 
 ### Added
@@ -92,6 +123,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Return safe redacted diagnostics while an entry is temporarily unloaded
   during a reload.
 
-[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/caffeineflo/cradlewise-home-assistant/releases/tag/v0.1.0
