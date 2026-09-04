@@ -199,6 +199,20 @@ def test_ci_runs_lint_and_home_assistant_validation():
     )
 
 
+def test_ci_and_release_test_supported_and_current_home_assistant():
+    workflows = "\n".join(
+        Path(filename).read_text()
+        for filename in (
+            ".github/workflows/tests.yml",
+            ".github/workflows/release.yml",
+        )
+    )
+
+    assert workflows.count('home-assistant-version: "2026.8.0"') == 2
+    assert workflows.count('home-assistant-version: "2026.9.0"') == 2
+    assert workflows.count("Verify state-only imports without media dependencies") == 2
+
+
 def test_hacs_validation_activates_when_repository_is_public():
     workflow = Path(".github/workflows/tests.yml").read_text()
     hacs_step = workflow.split("      - name: Run HACS validation", 1)[1].split(
