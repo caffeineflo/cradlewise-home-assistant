@@ -32,6 +32,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Preserve cloud authentication failures after a rejected credential refresh
   so Home Assistant starts reauthentication instead of reporting a generic API
   outage.
+- Run the first cloud REST fallback poll immediately, including when Home
+  Assistant starts on a freshly booted host.
 - Continue Automatic setup with cloud connectivity when local discovery or
   broker verification fails, and roll back new registrations when Local-only
   setup or certificate download fails.

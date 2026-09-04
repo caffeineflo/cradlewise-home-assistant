@@ -279,6 +279,19 @@ async def test_stopped_mqtt_provider_is_retried_with_backoff(
     assert cloud.async_start.await_count == 1
 
 
+async def test_first_cloud_poll_is_due_on_a_freshly_booted_host(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.cradlewise.coordinator.time.monotonic",
+        lambda: 1,
+    )
+    coordinator = CradlewiseCoordinator(hass, _entry())
+
+    assert coordinator._cloud_poll_due()
+
+
 async def test_local_rediscovery_accepts_a_new_address_with_the_pinned_ca(
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
