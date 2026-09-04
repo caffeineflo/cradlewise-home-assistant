@@ -61,6 +61,7 @@ from custom_components.cradlewise.diagnostics import (
 )
 from custom_components.cradlewise.repairs import (
     ClientCertificateRepairFlow,
+    async_schedule_client_certificate_issue_updates,
     async_update_client_certificate_issue,
 )
 
@@ -370,6 +371,30 @@ async def test_local_only_setup_reports_registration_cleanup_failure(
     assert (result["type"], result["reason"]) == (
         data_entry_flow.FlowResultType.ABORT,
         "registration_cleanup_failed",
+    )
+
+
+async def test_local_only_setup_removes_registration_when_broker_pin_fails(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_cloud_setup(monkeypatch)
+    removed: list[list[str]] = []
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow._pin_credentials",
+        Mock(side_effect=BrokerCertificateError("broker unavailable")),
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.CloudAccountClient.remove_user_devices",
+        lambda self, account, device_ids: removed.append(device_ids) or device_ids,
+    )
+
+    result = await _start_account_flow(hass, CONNECTION_MODE_LOCAL)
+
+    assert (result["type"], result["reason"], removed) == (
+        data_entry_flow.FlowResultType.ABORT,
+        "cannot_connect_local",
+        [[DEVICE_ID]],
     )
 
 
@@ -964,6 +989,35 @@ async def test_healthy_client_certificate_clears_existing_repair(
         None,
         current + timedelta(days=335),
     )
+
+
+async def test_certificate_repair_boundary_timer_is_cancelable(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_base_entry_data(),
+        version=1,
+    )
+    next_update = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    cancel_timer = Mock()
+    tracked_updates: list[datetime] = []
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.async_update_client_certificate_issue",
+        lambda hass, entry, now=None: next_update,
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.async_track_point_in_utc_time",
+        lambda hass, action, point: tracked_updates.append(point) or cancel_timer,
+    )
+
+    cancel_updates = async_schedule_client_certificate_issue_updates(hass, entry)
+    cancel_updates()
+
+    assert (tracked_updates, cancel_timer.call_count) == ([next_update], 1)
 
 
 async def test_certificate_repair_preserves_identity_and_can_remove_old_registration(
