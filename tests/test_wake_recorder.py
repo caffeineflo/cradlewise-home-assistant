@@ -16,7 +16,7 @@ def test_wake_recording_uses_native_camera_action():
 def test_wake_recording_targets_live_camera_entity():
     automation = AUTOMATIONS_PATH.read_text()
 
-    assert "entity_id: camera.cradlewise" in automation
+    assert "entity_id: camera.your_crib_camera" in automation
 
 
 def test_wake_recording_preserves_two_minute_pre_and_post_windows():
@@ -38,7 +38,7 @@ def test_wake_recording_uses_native_baby_present_condition():
     automation = AUTOMATIONS_PATH.read_text()
 
     expected = '''condition: state
-      entity_id: binary_sensor.cradlewise_baby_present
+      entity_id: binary_sensor.your_crib_baby_present
       state: "on"'''
     assert expected in automation
 
@@ -46,10 +46,10 @@ def test_wake_recording_uses_native_baby_present_condition():
 def test_wake_recording_preserves_existing_trigger_entities():
     automation = AUTOMATIONS_PATH.read_text()
     trigger_entities = {
-        "sensor.cradlewise_sleep_phase",
-        "sensor.cradlewise_sleep_state",
-        "binary_sensor.cradlewise_baby_needs_attention",
-        "binary_sensor.cradlewise_baby_needs_help",
+        "sensor.your_crib_sleep_phase",
+        "sensor.your_crib_sleep_state",
+        "binary_sensor.your_crib_baby_needs_attention",
+        "binary_sensor.your_crib_baby_needs_help",
     }
 
     assert all(entity_id in automation for entity_id in trigger_entities)
@@ -58,9 +58,9 @@ def test_wake_recording_preserves_existing_trigger_entities():
 def test_attention_and_help_trigger_only_when_turned_on():
     automation = AUTOMATIONS_PATH.read_text()
     triggers = {
-        '''entity_id: binary_sensor.cradlewise_baby_needs_attention
+        '''entity_id: binary_sensor.your_crib_baby_needs_attention
       to: "on"''',
-        '''entity_id: binary_sensor.cradlewise_baby_needs_help
+        '''entity_id: binary_sensor.your_crib_baby_needs_help
       to: "on"''',
     }
 
@@ -84,7 +84,7 @@ def test_wake_recording_preserves_transition_matrix():
 def test_loud_sound_remains_non_triggering():
     automation = AUTOMATIONS_PATH.read_text()
 
-    assert "binary_sensor.cradlewise_loud_sound_detected" not in automation
+    assert "binary_sensor.your_crib_loud_sound_detected" not in automation
 
 
 def test_wake_recording_has_no_template_condition():
@@ -120,12 +120,12 @@ def test_documentation_requires_preload_and_explains_retention():
 def test_documentation_preserves_six_state_anchors():
     documentation = DOCS_PATH.read_text()
     state_anchors = {
-        "binary_sensor.cradlewise_baby_present",
-        "binary_sensor.cradlewise_baby_needs_attention",
-        "binary_sensor.cradlewise_baby_needs_help",
-        "binary_sensor.cradlewise_loud_sound_detected",
-        "sensor.cradlewise_sleep_phase",
-        "sensor.cradlewise_sleep_state",
+        "binary_sensor.your_crib_baby_present",
+        "binary_sensor.your_crib_baby_needs_attention",
+        "binary_sensor.your_crib_baby_needs_help",
+        "binary_sensor.your_crib_loud_sound_detected",
+        "sensor.your_crib_sleep_phase",
+        "sensor.your_crib_sleep_state",
     }
 
     assert all(entity_id in documentation for entity_id in state_anchors)

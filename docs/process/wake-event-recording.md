@@ -90,23 +90,23 @@ version so browsers do not keep an old cached copy.
 The example starts a recording only when the baby is present and one of these
 events happens:
 
-- `sensor.cradlewise_sleep_phase` changes from `sleep` to `awake`
-- `sensor.cradlewise_sleep_phase` changes from `sleep` to `stirring`
-- `sensor.cradlewise_sleep_state` changes from `Light sleep` to `Quite Awake`
-- `sensor.cradlewise_sleep_state` changes from `Light sleep` to `Active Awake`
-- `sensor.cradlewise_sleep_state` changes from `Deep sleep` to `Quite Awake`
-- `sensor.cradlewise_sleep_state` changes from `Deep sleep` to `Active Awake`
-- `binary_sensor.cradlewise_baby_needs_attention` turns on
-- `binary_sensor.cradlewise_baby_needs_help` turns on
+- `sensor.your_crib_sleep_phase` changes from `sleep` to `awake`
+- `sensor.your_crib_sleep_phase` changes from `sleep` to `stirring`
+- `sensor.your_crib_sleep_state` changes from `Light sleep` to `Quite Awake`
+- `sensor.your_crib_sleep_state` changes from `Light sleep` to `Active Awake`
+- `sensor.your_crib_sleep_state` changes from `Deep sleep` to `Quite Awake`
+- `sensor.your_crib_sleep_state` changes from `Deep sleep` to `Active Awake`
+- `binary_sensor.your_crib_baby_needs_attention` turns on
+- `binary_sensor.your_crib_baby_needs_help` turns on
 
 The six stable state anchors for this workflow are:
 
-- `binary_sensor.cradlewise_baby_present`
-- `binary_sensor.cradlewise_baby_needs_attention`
-- `binary_sensor.cradlewise_baby_needs_help`
-- `binary_sensor.cradlewise_loud_sound_detected`
-- `sensor.cradlewise_sleep_phase`
-- `sensor.cradlewise_sleep_state`
+- `binary_sensor.your_crib_baby_present`
+- `binary_sensor.your_crib_baby_needs_attention`
+- `binary_sensor.your_crib_baby_needs_help`
+- `binary_sensor.your_crib_loud_sound_detected`
+- `sensor.your_crib_sleep_phase`
+- `sensor.your_crib_sleep_state`
 
 `loud_sound_detected` intentionally remains informational and does not start a
 recording. This preserves the existing trigger behavior and avoids creating a

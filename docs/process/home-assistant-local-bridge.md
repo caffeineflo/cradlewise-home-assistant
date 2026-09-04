@@ -252,15 +252,32 @@ dashboards, alerts, and common controls:
 - 10 binary sensors: baby present, baby needs attention/help, crib helping,
   light on, loud sound, lower breath-rate alert, obstruction, ineffective
   rocking, and bridge health
-- 7 sensors: sleep state, sleep phase, ambient temperature, breath rate,
-  bounce time remaining, music time remaining, and music mood
+- 9 sensors: sleep state, sleep phase, ambient temperature, breath rate,
+  bounce time remaining, music time remaining, music mood, plus state source and
+  state update time disabled by default
 - 5 numbers: bounce level, bounce amplitude, bounce duration, music level, and
   music volume
 - 3 selects: bounce mode, music mode, and music duration
 - 3 switches: actuator, music, and adaptive soothing
 - 1 optional camera
 
-State source and state update time are disabled by default. Raw shadow
+The exact unique-ID suffixes are:
+
+| Domain | Enabled by default | Disabled by default |
+| --- | --- | --- |
+| `binary_sensor` | `bridge_healthy`, `baby_present`, `baby_needs_attention`, `baby_needs_help`, `crib_helping`, `light_on`, `loud_sound_detected`, `rocking_not_effective`, `obstruction_detected`, `lower_breath_rate_alert` | None |
+| `sensor` | `sleep_state`, `sleep_phase`, `bounce_time_remaining`, `music_mood`, `music_time_remaining`, `ambient_temperature`, `breath_rate` | `device_state_source`, `device_state_updated_at` |
+| `number` | `bounce_level`, `music_level`, `bounce_amplitude`, `bounce_duration`, `music_volume` | None |
+| `select` | `bounce_mode`, `music_mode`, `music_duration` | None |
+| `switch` | `actuator_on`, `music_playing`, `adaptive_soothing_enabled` | None |
+| `camera` | `camera`, only when the optional media companion is configured | None |
+
+Home Assistant derives entity IDs from the crib name and these entity names, so
+the final IDs vary by installation. The integration keeps the config-entry
+unique ID and each entity unique ID stable across reconfigure, reload, and
+certificate repair.
+
+Raw shadow
 documents, calibration internals, upload privacy flags, debug controls, recipe
 internals, firmware actions, and duplicate cross-domain values are not created
 at all.
