@@ -16,6 +16,7 @@ from botocore.awsrequest import AWSRequest
 from botocore.credentials import Credentials
 from botocore.exceptions import BotoCoreError, ClientError
 from pycognito import Cognito
+from pycognito.exceptions import WarrantException
 
 USER_POOL_ID = "us-east-1_hRGLsOxun"
 CLIENT_ID = "4jnn2bbtroa3e6ra73dc8m8luh"
@@ -168,7 +169,7 @@ class CloudAccountClient:
             raise CloudApiError(
                 "Cradlewise authentication service is unavailable"
             ) from exc
-        except Exception as exc:
+        except WarrantException as exc:
             raise CloudAuthenticationError(
                 "Cradlewise account authentication failed"
             ) from exc
@@ -253,12 +254,14 @@ class CloudAccountClient:
         timezone: str = "UTC",
         country: str = "US",
     ) -> ProvisionedCredentials:
-        """Register a Home Assistant client and download its MQTT certificate."""
+        """Register a compatible client and download its MQTT certificate."""
         body = json.dumps(
             {
                 "email_id": self.email,
                 "baby_id": account.baby_id,
-                "fcm_token": "home_assistant",
+                # Android uses an empty string until Firebase supplies a token.
+                # This client does not implement Firebase push notifications.
+                "fcm_token": "",
                 "device": {
                     "registration_date": datetime.date.today().isoformat(),
                     "app_version": app_version,
@@ -480,18 +483,21 @@ class CloudAccountClient:
 
     @staticmethod
     def _download_s3_text(s3: Any, key: str) -> str:
-        errors = []
+        last_error: Exception | None = None
         for candidate in (key, f"public/{key}"):
             try:
                 response = s3.get_object(Bucket=S3_BUCKET, Key=candidate)
                 value = response["Body"].read().decode("utf-8")
                 if value.strip():
                     return value
-            except Exception as exc:
-                errors.append(exc)
-        raise CloudProvisioningError(
+            except (BotoCoreError, ClientError, KeyError, OSError, UnicodeError) as exc:
+                last_error = exc
+        error = CloudProvisioningError(
             f"could not download provisioned certificate object {key}"
-        ) from errors[-1]
+        )
+        if last_error is None:
+            raise error
+        raise error from last_error
 
 
 def _local_ip(payload: dict[str, Any]) -> str | None:

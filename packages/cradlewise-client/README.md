@@ -6,6 +6,10 @@ MQTT, account discovery, certificate provisioning, local broker pinning,
 client-certificate validity inspection, targeted device-registration cleanup,
 state normalization, and validated control payloads.
 
+Direct local MQTT requires a broker CA validated and pinned with
+`pin_server_ca`; the client doesn't disable TLS hostname verification when a
+pin is missing.
+
 The package is unofficial and based on interoperability research against the
 Cradlewise Android app. It does not start WebRTC sessions, process nursery
 audio or video, or require Home Assistant.

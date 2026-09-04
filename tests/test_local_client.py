@@ -70,7 +70,12 @@ class FakeMqttClient:
 
 @pytest.fixture
 def credentials(tmp_path: Path) -> LocalCredentials:
-    for name in ("ca.pem", "client_cert.pem", "client_key.pem"):
+    for name in (
+        "ca.pem",
+        "server_ca.pem",
+        "client_cert.pem",
+        "client_key.pem",
+    ):
         (tmp_path / name).write_text(name, encoding="utf-8")
     (tmp_path / "device_id").write_text("device-1", encoding="utf-8")
     return LocalCredentials.from_directory(tmp_path)
@@ -119,6 +124,23 @@ async def test_start_configures_tls_outside_event_loop(client_parts):
 
     assert mqtt_client.tls_thread_id != threading.get_ident()
     await client.async_stop()
+
+
+async def test_start_rejects_unpinned_local_broker_ca(tmp_path: Path):
+    for name in ("ca.pem", "client_cert.pem", "client_key.pem"):
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    (tmp_path / "device_id").write_text("device-1", encoding="utf-8")
+    client = LocalCradleClient(
+        host="192.0.2.10",
+        cradle_id="cradle-1",
+        credentials=LocalCredentials.from_directory(tmp_path),
+        update_callback=lambda update: None,
+        connection_callback=lambda connected: None,
+        mqtt_client_factory=FakeMqttClient,
+    )
+
+    with pytest.raises(LocalConnectionError, match="validated pinned broker CA"):
+        await client.async_start()
 
 
 async def test_start_subscribes_only_to_state_topics(client_parts):
@@ -173,20 +195,27 @@ async def test_start_cleans_up_when_state_initialization_fails(
 async def test_runtime_subscription_failure_stops_client_for_retry(client_parts):
     client, mqtt_client, _updates, _connection_states = client_parts
     await client.async_start()
-    stopped = asyncio.Event()
-    original_stop = client.async_stop
+    disconnect_started = threading.Event()
+    release_disconnect = threading.Event()
+    original_disconnect = mqtt_client.disconnect
 
-    async def stop_and_signal():
-        await original_stop()
-        stopped.set()
+    def delayed_disconnect():
+        disconnect_started.set()
+        release_disconnect.wait(timeout=1)
+        return original_disconnect()
 
-    client.async_stop = stop_and_signal
+    mqtt_client.disconnect = delayed_disconnect
     mqtt_client.on_connect(mqtt_client, None, {}, 0, None)
     mqtt_client.on_subscribe(mqtt_client, None, 7, [128] * 6, None)
 
-    await asyncio.wait_for(stopped.wait(), timeout=1)
+    assert await asyncio.to_thread(disconnect_started.wait, 1)
+    explicit_stop = asyncio.create_task(client.async_stop())
+    await asyncio.sleep(0)
+    waited_for_error_cleanup = not explicit_stop.done()
+    release_disconnect.set()
+    await explicit_stop
 
-    assert client.started is False
+    assert (waited_for_error_cleanup, client.started) == (True, False)
 
 
 async def test_state_message_is_dispatched_on_event_loop(client_parts):

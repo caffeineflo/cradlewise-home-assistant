@@ -118,6 +118,7 @@ class LocalCradleClient:
         self._connected_future: asyncio.Future[None] | None = None
         self._connected = False
         self._stopping = False
+        self._stop_task: asyncio.Task[None] | None = None
         self._mqtt_loop_started = False
         self._publish_lock = threading.Lock()
         self._state_subscription_mids: set[int] = set()
@@ -182,18 +183,26 @@ class LocalCradleClient:
             raise
 
     def _configure_tls(self, client: mqtt.Client) -> None:
-        """Configure local broker TLS, including legacy CA compatibility."""
+        """Configure local broker TLS with a validated server CA."""
+        if not self.credentials.uses_pinned_server_ca:
+            raise LocalConnectionError(
+                "local MQTT requires a validated pinned broker CA"
+            )
         client.tls_set(
             ca_certs=str(self.credentials.ca_path),
             certfile=str(self.credentials.client_cert_path),
             keyfile=str(self.credentials.client_key_path),
             tls_version=ssl.PROTOCOL_TLS_CLIENT,
         )
-        if not self.credentials.uses_pinned_server_ca:
-            client.tls_insecure_set(True)
 
     async def async_stop(self) -> None:
         """Disconnect and stop the Paho network thread."""
+        current_task = asyncio.current_task()
+        stop_task = self._stop_task
+        if stop_task is not None and stop_task is not current_task:
+            await asyncio.shield(stop_task)
+            return
+
         client = self._mqtt
         if client is None:
             return
@@ -356,7 +365,26 @@ class LocalCradleClient:
             self._connected_future.set_exception(error)
             return
         _LOGGER.error("Local Cradlewise MQTT error: %s", error)
-        asyncio.create_task(self.async_stop())
+        if self._stop_task is None or self._stop_task.done():
+            task = asyncio.create_task(
+                self.async_stop(),
+                name=f"cradlewise-local-stop-{self.cradle_id}",
+            )
+            self._stop_task = task
+            task.add_done_callback(self._handle_stop_task_done)
+
+    def _handle_stop_task_done(self, task: asyncio.Task[None]) -> None:
+        """Observe background shutdown completion and report failures."""
+        if self._stop_task is task:
+            self._stop_task = None
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            _LOGGER.error(
+                "Could not stop local Cradlewise MQTT after a connection error",
+                exc_info=(type(error), error, error.__traceback__),
+            )
 
     def _set_connected(self, connected: bool) -> None:
         if self._connected == connected:

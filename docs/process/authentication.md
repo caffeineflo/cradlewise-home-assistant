@@ -73,7 +73,7 @@ Request body:
 {
   "email_id": "user@example.com",
   "baby_id": 12345,
-  "fcm_token": "...",
+  "fcm_token": "",
   "device": {
     "registration_date": "2026-02-15",
     "app_version": "2.55.5",
@@ -101,6 +101,9 @@ The Android app identifies a registration as `Build.MODEL + "_" + Android ID`.
 The Home Assistant client preserves that backend-compatible shape with a
 randomly selected Android model identifier and random 16-character ID. It does
 not expose a fixed `Home Assistant` device name in the Cradlewise device list.
+The app reads an empty string before Firebase supplies a push token. Because the
+integration doesn't receive Firebase notifications, it keeps that empty-token
+state instead of inventing or claiming a push destination.
 
 ## Step 5: Download Certs from S3
 
