@@ -360,7 +360,7 @@ ghcr.io/caffeineflo/cradlewise-local-bridge
 Published tags include the release tag, its semantic version aliases, and the
 short git SHA. For a server deployment, pull a published release version and
 recreate the bridge container deliberately rather than auto-deploying from CI.
-The example Compose file uses `CRADLEWISE_BRIDGE_VERSION=0.2.0`. Select the
+The example Compose file uses `CRADLEWISE_BRIDGE_VERSION=0.2.1`. Select the
 version matching the integration release you installed.
 
 ## Local Development

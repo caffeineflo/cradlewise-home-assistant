@@ -30,7 +30,7 @@ services:
         max-file: "3"
 
   cradlewise-bridge:
-    image: ghcr.io/caffeineflo/cradlewise-local-bridge:${CRADLEWISE_BRIDGE_VERSION:-0.2.0}
+    image: ghcr.io/caffeineflo/cradlewise-local-bridge:${CRADLEWISE_BRIDGE_VERSION:-0.2.1}
     container_name: cradlewise-bridge
     restart: unless-stopped
     init: true
