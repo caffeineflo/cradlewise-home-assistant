@@ -5,51 +5,51 @@
   max_exceeded: silent
   triggers:
     - trigger: state
-      entity_id: sensor.cradlewise_sleep_phase
+      entity_id: sensor.your_crib_sleep_phase
       from: "sleep"
       to: "awake"
       id: sleep_phase_awake
     - trigger: state
-      entity_id: sensor.cradlewise_sleep_phase
+      entity_id: sensor.your_crib_sleep_phase
       from: "sleep"
       to: "stirring"
       id: sleep_phase_stirring
     - trigger: state
-      entity_id: sensor.cradlewise_sleep_state
+      entity_id: sensor.your_crib_sleep_state
       from: "Light sleep"
       to: "Quite Awake"
       id: light_sleep_quite_awake
     - trigger: state
-      entity_id: sensor.cradlewise_sleep_state
+      entity_id: sensor.your_crib_sleep_state
       from: "Light sleep"
       to: "Active Awake"
       id: light_sleep_active_awake
     - trigger: state
-      entity_id: sensor.cradlewise_sleep_state
+      entity_id: sensor.your_crib_sleep_state
       from: "Deep sleep"
       to: "Quite Awake"
       id: deep_sleep_quite_awake
     - trigger: state
-      entity_id: sensor.cradlewise_sleep_state
+      entity_id: sensor.your_crib_sleep_state
       from: "Deep sleep"
       to: "Active Awake"
       id: deep_sleep_active_awake
     - trigger: state
-      entity_id: binary_sensor.cradlewise_baby_needs_attention
+      entity_id: binary_sensor.your_crib_baby_needs_attention
       to: "on"
       id: baby_needs_attention
     - trigger: state
-      entity_id: binary_sensor.cradlewise_baby_needs_help
+      entity_id: binary_sensor.your_crib_baby_needs_help
       to: "on"
       id: baby_needs_help
   conditions:
     - condition: state
-      entity_id: binary_sensor.cradlewise_baby_present
+      entity_id: binary_sensor.your_crib_baby_present
       state: "on"
   actions:
     - action: camera.record
       target:
-        entity_id: camera.cradlewise
+        entity_id: camera.your_crib_camera
       data:
         filename: >-
           /media/cradlewise-wake/events/cradlewise_wake_{{ now().strftime('%Y%m%d-%H%M%S') }}.mp4
