@@ -169,7 +169,9 @@ After the repository is added:
 The account step explains exactly which credentials the selected mode retains.
 Provisioning creates a device registration whose name follows the Android app's
 `model_random-id` shape instead of identifying Home Assistant. The integration
-stores the returned device ID and certificate material, not that display name.
+doesn't register for Firebase push notifications and sends the empty-token state
+used by the Android app before Firebase supplies a token. It stores the returned
+device ID and certificate material, not that display name.
 
 To add video later, open the integration's Configure action, select **Configure
 optional media companion**, and enter the companion URL and bearer token.
@@ -358,7 +360,7 @@ ghcr.io/caffeineflo/cradlewise-local-bridge
 Published tags include the release tag, its semantic version aliases, and the
 short git SHA. For a server deployment, pull a published release version and
 recreate the bridge container deliberately rather than auto-deploying from CI.
-The example Compose file uses `CRADLEWISE_BRIDGE_VERSION=0.1.0`. Select the
+The example Compose file uses `CRADLEWISE_BRIDGE_VERSION=0.2.0`. Select the
 version matching the integration release you installed.
 
 ## Local Development

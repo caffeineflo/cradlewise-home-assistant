@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-04
+
 ### Added
 
 - Home Assistant Repairs for missing, invalid, expired, and soon-to-expire
@@ -20,11 +22,22 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   connection mode directly in the setup flow.
 - Register new certificate clients with randomized Android-style device names
   instead of an identifying Home Assistant label.
+- Use the Android app's empty pre-Firebase token state because the integration
+  doesn't implement push notifications.
+
+### Fixed
+
+- Retain and observe connection-error shutdown tasks so unload waits for local
+  MQTT cleanup and shutdown failures are logged.
+- Limit cloud authentication and certificate-download recovery to expected
+  provider failures so unexpected errors remain visible.
 
 ### Security
 
 - Require HTTPS for non-private media companion destinations and explicit
   consent before accepting HTTP on a private network.
+- Require a validated pinned broker CA for local MQTT instead of disabling TLS
+  hostname verification when a pin is missing.
 
 ## [0.1.0] - 2026-08-29
 
@@ -79,5 +92,6 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Return safe redacted diagnostics while an entry is temporarily unloaded
   during a reload.
 
-[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/caffeineflo/cradlewise-home-assistant/releases/tag/v0.1.0

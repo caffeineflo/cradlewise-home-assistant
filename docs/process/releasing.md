@@ -34,6 +34,7 @@ publishing it.
 ## Release checklist
 
 1. Set the same version in:
+   - the root `pyproject.toml` project and `cradlewise-client==...` requirement
    - `packages/cradlewise-client/pyproject.toml`
    - `custom_components/cradlewise/manifest.json`
    - the integration's `cradlewise-client==...` requirement
