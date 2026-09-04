@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from cradlewise_client.cloud import CLIENT_SECRET
 
 try:
     from homeassistant import config_entries, data_entry_flow
@@ -1093,6 +1094,7 @@ async def test_diagnostics_redact_all_credentials(
 
     serialized = str(diagnostics)
     assert "secret" not in serialized
+    assert CLIENT_SECRET not in serialized
     assert "parent@example.com" not in serialized
     assert "client private key" not in serialized
     assert "192.0.2.10" not in serialized

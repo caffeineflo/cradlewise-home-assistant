@@ -7,6 +7,7 @@ import cradlewise_client.cloud as cloud
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 from cradlewise_client.cloud import CloudAccountClient, CradleAccount, UserDevice
+from pycognito.exceptions import WarrantException
 
 
 class FakeResponse:
@@ -185,6 +186,7 @@ def test_provisioning_classifies_certificate_objects(monkeypatch):
     )
     assert registration["device"]["device_name"].startswith(cloud.ANDROID_DEVICE_MODELS)
     assert len(registration["device"]["device_name"].rsplit("_", 1)[1]) == 16
+    assert registration["fcm_token"] == ""
 
 
 def test_list_user_devices_returns_only_authenticated_users_devices(monkeypatch):
@@ -286,3 +288,58 @@ def test_authentication_reports_rejected_credentials_as_invalid_auth(monkeypatch
 
     with pytest.raises(cloud.CloudAuthenticationError):
         client.authenticate()
+
+
+def test_authentication_reports_client_challenges_as_invalid_auth(monkeypatch):
+    class ChallengedCognito:
+        id_token = None
+
+        def authenticate(self, password):
+            raise WarrantException("additional authentication is required")
+
+    monkeypatch.setattr(cloud, "Cognito", lambda *args, **kwargs: ChallengedCognito())
+    client = CloudAccountClient(email="user@example.com", password="secret")
+
+    with pytest.raises(cloud.CloudAuthenticationError):
+        client.authenticate()
+
+
+def test_authentication_does_not_misclassify_unexpected_errors(monkeypatch):
+    class BrokenCognito:
+        id_token = None
+
+        def authenticate(self, password):
+            raise RuntimeError("programming failure")
+
+    monkeypatch.setattr(cloud, "Cognito", lambda *args, **kwargs: BrokenCognito())
+    client = CloudAccountClient(email="user@example.com", password="secret")
+
+    with pytest.raises(RuntimeError, match="programming failure"):
+        client.authenticate()
+
+
+def test_certificate_download_retries_the_backend_public_prefix():
+    requested = []
+
+    class PrefixFallbackS3:
+        def get_object(self, *, Bucket, Key):
+            requested.append((Bucket, Key))
+            if not Key.startswith("public/"):
+                raise ClientError(
+                    {"Error": {"Code": "NoSuchKey", "Message": "missing"}},
+                    "GetObject",
+                )
+            return {"Body": SimpleNamespace(read=lambda: b"certificate")}
+
+    result = CloudAccountClient._download_s3_text(PrefixFallbackS3(), "crib/cert.pem")
+
+    assert (result, requested[-1][1]) == ("certificate", "public/crib/cert.pem")
+
+
+def test_certificate_download_does_not_hide_unexpected_errors():
+    class BrokenS3:
+        def get_object(self, *, Bucket, Key):
+            raise RuntimeError("programming failure")
+
+    with pytest.raises(RuntimeError, match="programming failure"):
+        CloudAccountClient._download_s3_text(BrokenS3(), "crib/cert.pem")
