@@ -1,5 +1,6 @@
 import ast
 import json
+import re
 from pathlib import Path
 
 INTEGRATION_PATH = Path("custom_components/cradlewise")
@@ -43,7 +44,7 @@ def test_manifest_is_a_hacs_compatible_device_integration() -> None:
     assert manifest["iot_class"] == "local_push"
     assert manifest["dependencies"] == []
     assert manifest["after_dependencies"] == ["ffmpeg", "stream"]
-    assert manifest["requirements"] == ["cradlewise-client==0.1.0"]
+    assert len(manifest["requirements"]) == 1
     assert manifest["documentation"] == (
         "https://github.com/caffeineflo/cradlewise-home-assistant"
     )
@@ -52,6 +53,34 @@ def test_manifest_is_a_hacs_compatible_device_integration() -> None:
     )
     assert manifest["version"]
     assert manifest["codeowners"] == ["@caffeineflo"]
+
+
+def test_release_versions_are_synchronized() -> None:
+    manifest = json.loads(
+        (INTEGRATION_PATH / "manifest.json").read_text(encoding="utf-8")
+    )
+    root_project = Path("pyproject.toml").read_text(encoding="utf-8")
+    client_project = Path("packages/cradlewise-client/pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    root_version = re.search(r'^version = "([^"]+)"$', root_project, re.MULTILINE)
+    client_version = re.search(r'^version = "([^"]+)"$', client_project, re.MULTILINE)
+
+    assert root_version is not None
+    assert client_version is not None
+    version = client_version.group(1)
+
+    assert (
+        root_version.group(1),
+        manifest["version"],
+        manifest["requirements"],
+        f'"cradlewise-client=={version}"' in root_project,
+    ) == (
+        version,
+        version,
+        [f"cradlewise-client=={version}"],
+        True,
+    )
 
 
 def test_repository_contains_exactly_one_custom_integration_manifest() -> None:
