@@ -92,6 +92,16 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - home-assistant-version: "2026.8.0"
+            ha-test-version: "0.13.354"
+            minimum: true
+          - home-assistant-version: "2026.9.0"
+            ha-test-version: "0.13.363"
+            minimum: false
 
     steps:
       - name: Check out repository
@@ -105,10 +115,50 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Create isolated Home Assistant environment
+        run: uv venv .ha-test --python 3.14
+
+      - name: Verify state-only imports without media dependencies
+        if: matrix.minimum
+        run: |
+          set -euo pipefail
+          uv pip install --python .ha-test/bin/python \
+            "homeassistant==${{ matrix.home-assistant-version }}" \
+            --editable ./packages/cradlewise-client
+          .ha-test/bin/python - <<'PY'
+          import importlib
+
+          from homeassistant.const import Platform
+
+          from custom_components.cradlewise import BASE_PLATFORMS
+
+          assert Platform.CAMERA not in BASE_PLATFORMS
+          for platform in BASE_PLATFORMS:
+              importlib.import_module(f"custom_components.cradlewise.{platform}")
+          PY
+
+      - name: Install Home Assistant test runtime
+        run: |
+          set -euo pipefail
+          uv pip install --python .ha-test/bin/python \
+            "pytest-homeassistant-custom-component==${{ matrix.ha-test-version }}" \
+            "PyTurboJPEG==2.5.0" \
+            "av==17.0.1" \
+            "ha-ffmpeg==3.2.2" \
+            --editable ./packages/cradlewise-client
+
+      - name: Verify Home Assistant version
+        run: |
+          actual="$(
+            .ha-test/bin/python -c \
+              'from importlib.metadata import version; print(version("homeassistant"))'
+          )"
+          test "${actual}" = "${{ matrix.home-assistant-version }}"
+
       - name: Run Home Assistant integration tests
         run: >-
-          uv run --locked --python 3.14 --extra test --extra ha-test
-          python -m pytest tests/test_ha_integration.py tests/test_ha_coordinator.py
+          .ha-test/bin/python -m pytest
+          tests/test_ha_integration.py tests/test_ha_coordinator.py
 
   home-assistant-validation:
     runs-on: ubuntu-latest
