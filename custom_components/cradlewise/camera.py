@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shlex
 
 import aiohttp
 from haffmpeg.tools import IMAGE_JPEG
@@ -117,7 +118,7 @@ class CradlewiseBridgeCamera(Camera):
 
     def _ffmpeg_input(self) -> str:
         if self._stream_url.startswith(("rtsp://", "rtsps://")):
-            return f"-rtsp_transport tcp -i {self._stream_url}"
+            return f"-rtsp_transport tcp -i {shlex.quote(self._stream_url)}"
         return self._stream_url
 
     async def async_camera_image(

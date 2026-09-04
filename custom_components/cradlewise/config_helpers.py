@@ -24,6 +24,11 @@ KNOWN_ENDPOINTS = {
 
 def _parsed_url(value: str, schemes: set[str]) -> SplitResult | None:
     """Parse a URL that has an allowed scheme and a real host."""
+    if any(
+        character.isspace() or ord(character) < 32 or ord(character) == 127
+        for character in value
+    ):
+        return None
     try:
         parsed = urlsplit(value)
         port = parsed.port

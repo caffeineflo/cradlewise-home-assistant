@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,8 @@ from .coordinator import (
     BridgeVersionError,
     async_fetch_bridge_info,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _mode_schema() -> vol.Schema:
@@ -487,13 +490,12 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(account.cradle_id)
         self._abort_if_unique_id_configured()
         try:
-            credentials, local_host = await self.hass.async_add_executor_job(
+            credentials = await self.hass.async_add_executor_job(
                 self._provision_account,
                 self._cloud,
                 account,
                 self.hass.config.time_zone,
                 self.hass.config.country or "US",
-                self._mode != CONNECTION_MODE_CLOUD,
             )
         except CloudAuthenticationError:
             return self.async_abort(reason="invalid_auth")
@@ -502,11 +504,45 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except OSError:
             return self.async_abort(reason="cannot_connect")
 
+        local_host = None
         server_ca = None
         if self._mode != CONNECTION_MODE_CLOUD:
+            try:
+                local_host = await self.hass.async_add_executor_job(
+                    self._cloud.get_cradle_ip,
+                    account.cradle_id,
+                )
+            except CloudAuthenticationError as exc:
+                if self._mode == CONNECTION_MODE_LOCAL:
+                    return await self._async_abort_provisioned_setup(
+                        account,
+                        credentials.device_id,
+                        "invalid_auth",
+                    )
+                _LOGGER.warning(
+                    "Could not authenticate local discovery after provisioning; "
+                    "continuing Automatic mode with cloud connectivity: %s",
+                    exc,
+                )
+            except (CloudApiError, OSError) as exc:
+                if self._mode == CONNECTION_MODE_LOCAL:
+                    return await self._async_abort_provisioned_setup(
+                        account,
+                        credentials.device_id,
+                        "cannot_connect",
+                    )
+                _LOGGER.warning(
+                    "Could not discover the local crib after provisioning; "
+                    "continuing Automatic mode with cloud connectivity: %s",
+                    exc,
+                )
             if local_host is None:
                 if self._mode == CONNECTION_MODE_LOCAL:
-                    return self.async_abort(reason="cannot_find_device")
+                    return await self._async_abort_provisioned_setup(
+                        account,
+                        credentials.device_id,
+                        "cannot_find_device",
+                    )
             else:
                 try:
                     server_ca = await self.hass.async_add_executor_job(
@@ -514,9 +550,18 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         credentials,
                         local_host,
                     )
-                except (BrokerCertificateError, OSError):
+                except (BrokerCertificateError, OSError) as exc:
                     if self._mode == CONNECTION_MODE_LOCAL:
-                        return self.async_abort(reason="cannot_connect_local")
+                        return await self._async_abort_provisioned_setup(
+                            account,
+                            credentials.device_id,
+                            "cannot_connect_local",
+                        )
+                    _LOGGER.warning(
+                        "Could not verify the local crib broker; continuing "
+                        "Automatic mode with cloud connectivity: %s",
+                        exc,
+                    )
                     local_host = None
 
         data: dict[str, Any] = {
@@ -538,6 +583,35 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data=data,
         )
 
+    async def _async_abort_provisioned_setup(
+        self,
+        account: CradleAccount,
+        device_id: str,
+        reason: str,
+    ) -> ConfigFlowResult:
+        """Remove a new registration before aborting local-only setup."""
+        assert self._cloud is not None
+        try:
+            removed = await self.hass.async_add_executor_job(
+                self._cloud.remove_user_devices,
+                account,
+                [device_id],
+            )
+        except (CloudApiError, CloudAuthenticationError, OSError) as exc:
+            _LOGGER.error(
+                "Could not remove the new Cradlewise device registration after "
+                "local-only setup failed: %s",
+                exc,
+            )
+            return self.async_abort(reason="registration_cleanup_failed")
+        if removed != [device_id]:
+            _LOGGER.error(
+                "Cradlewise did not confirm removal of the new device registration "
+                "after local-only setup failed"
+            )
+            return self.async_abort(reason="registration_cleanup_failed")
+        return self.async_abort(reason=reason)
+
     @staticmethod
     def _authenticate_and_list(
         cloud: CloudAccountClient,
@@ -551,15 +625,12 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         account: CradleAccount,
         timezone: str,
         country: str,
-        discover_local: bool,
-    ) -> tuple[ProvisionedCredentials, str | None]:
-        credentials = cloud.provision_credentials(
+    ) -> ProvisionedCredentials:
+        return cloud.provision_credentials(
             account,
             timezone=timezone,
             country=country,
         )
-        local_host = cloud.get_cradle_ip(account.cradle_id) if discover_local else None
-        return credentials, local_host
 
 
 class CradlewiseOptionsFlow(OptionsFlow):

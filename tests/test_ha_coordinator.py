@@ -3,13 +3,16 @@ from __future__ import annotations
 import threading
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from cradlewise_client.cloud import CloudAuthenticationError
 
 try:
-    from homeassistant.const import CONF_NAME
+    from homeassistant import config_entries
+    from homeassistant.const import CONF_EMAIL, CONF_NAME, CONF_PASSWORD
     from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.update_coordinator import UpdateFailed
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 except ModuleNotFoundError:
     pytest.skip(
@@ -191,6 +194,71 @@ async def test_cloud_only_media_health_fails_closed_without_hiding_cloud_state(
         snapshot["providers"]["active"],
         snapshot["bridge"]["healthy"],
     ) == (True, "cloud", False)
+
+
+async def test_cloud_auth_failure_starts_reauth_without_hiding_local_state(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry(
+        **{
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "expired-secret",
+        }
+    )
+    entry.add_to_hass(hass)
+    coordinator = CradlewiseCoordinator(hass, entry)
+    coordinator._cloud_account = SimpleNamespace(
+        get_cradle_state=Mock(
+            side_effect=CloudAuthenticationError("credentials rejected")
+        )
+    )
+    coordinator._state.set_connected("local", True)
+    coordinator._state.update_device_state(
+        {"state": {"reported": {"babyPresent": False}}},
+        "local",
+    )
+
+    snapshot = await coordinator._async_update_data()
+    await hass.async_block_till_done()
+
+    active_flows = list(
+        entry.async_get_active_flows(
+            hass,
+            {config_entries.SOURCE_REAUTH},
+        )
+    )
+    assert (snapshot["device_state"]["available"], len(active_flows)) == (True, 1)
+
+
+async def test_cloud_only_auth_failure_is_unavailable_and_starts_reauth(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry(
+        **{
+            CONF_CONNECTION_MODE: CONNECTION_MODE_CLOUD,
+            CONF_EMAIL: "parent@example.com",
+            CONF_PASSWORD: "expired-secret",
+        }
+    )
+    entry.add_to_hass(hass)
+    coordinator = CradlewiseCoordinator(hass, entry)
+    coordinator._cloud_account = SimpleNamespace(
+        get_cradle_state=Mock(
+            side_effect=CloudAuthenticationError("credentials rejected")
+        )
+    )
+
+    with pytest.raises(UpdateFailed, match="credentials rejected"):
+        await coordinator._async_update_data()
+    await hass.async_block_till_done()
+
+    active_flows = list(
+        entry.async_get_active_flows(
+            hass,
+            {config_entries.SOURCE_REAUTH},
+        )
+    )
+    assert len(active_flows) == 1
 
 
 async def test_stopped_mqtt_provider_is_retried_with_backoff(

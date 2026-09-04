@@ -7,6 +7,7 @@
       "cannot_connect_local": "Cloud setup succeeded, but the crib's local broker could not be verified",
       "cannot_find_device": "The crib did not report a local network address",
       "invalid_auth": "Cradlewise rejected the account credentials",
+      "registration_cleanup_failed": "Local-only setup failed and the new Cradlewise cloud device registration could not be removed",
       "reauth_successful": "Cradlewise account reconnected",
       "reconfigure_successful": "Cradlewise configuration updated"
     },
