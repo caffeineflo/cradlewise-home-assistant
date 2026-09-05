@@ -83,6 +83,11 @@ class BridgeStreamer(CribStreamer):
         self._command_lock = threading.Lock()
         self._shadow_subscription_mids: set[int] = set()
 
+    def release_media_resources(self) -> None:
+        """Release native codec pools owned by this connection attempt."""
+        self._snapshot_decoder = None
+        self._audio_resampler = None
+
     def _setup_mqtt(self):
         super()._setup_mqtt()
         self._mqtt.on_subscribe = self._on_subscribe
@@ -337,5 +342,6 @@ async def run_bridge(
     try:
         await streamer.run()
     finally:
+        streamer.release_media_resources()
         if command_handler is not None:
             command_handler.clear_publisher()
