@@ -397,6 +397,9 @@ class CribStreamer:
         self._mqtt = client
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
+        if self._shutting_down:
+            log.debug("Ignoring MQTT connect callback during shutdown")
+            return
         if reason_code == 0:
             log.info("MQTT connected to %s:%d (flags=%s)", self.ip, MQTT_PORT, flags)
             self._cancel_mqtt_reconnect_grace_threadsafe()
@@ -805,6 +808,7 @@ class CribStreamer:
 
         message_task = None
         mqtt_loop_started = False
+        primary_error = None
         try:
             self._setup_mqtt()
             log.info(
@@ -826,29 +830,73 @@ class CribStreamer:
             if self._fatal_future in done:
                 self._fatal_future.result()
             message_task.result()
+        except BaseException as exc:
+            primary_error = exc
+            raise
         finally:
             log.info("Shutting down...")
             self._shutting_down = True
+            cleanup_errors = []
             self._cancel_mqtt_reconnect_grace()
             if message_task is not None:
                 message_task.cancel()
-                await asyncio.gather(message_task, return_exceptions=True)
             if self._fatal_future is not None and not self._fatal_future.done():
                 self._fatal_future.cancel()
             if self._keepalive_task:
                 self._keepalive_task.cancel()
             for task in tuple(self._track_tasks):
                 task.cancel()
-            await asyncio.gather(*self._track_tasks, return_exceptions=True)
-            if self._pc:
-                await self._pc.close()
-                self._pc = None
-            if self._mqtt is not None:
-                self._mqtt.disconnect()
+            mqtt_client = self._mqtt
+            if mqtt_client is not None:
+                try:
+                    mqtt_client.disconnect()
+                except BaseException as exc:
+                    cleanup_errors.append(("MQTT disconnect", exc))
                 if mqtt_loop_started:
-                    self._mqtt.loop_stop()
+                    try:
+                        mqtt_client.loop_stop()
+                    except BaseException as exc:
+                        cleanup_errors.append(("MQTT network loop", exc))
+            self._mqtt = None
+            if message_task is not None:
+                try:
+                    await asyncio.gather(message_task, return_exceptions=True)
+                except BaseException as exc:
+                    cleanup_errors.append(("MQTT signaling task", exc))
+            try:
+                await asyncio.gather(*self._track_tasks, return_exceptions=True)
+            except BaseException as exc:
+                cleanup_errors.append(("media task", exc))
+            if self._pc:
+                peer_connection = self._pc
+                self._pc = None
+                try:
+                    await peer_connection.close()
+                except BaseException as exc:
+                    cleanup_errors.append(("WebRTC peer connection", exc))
             if self._ffplay:
-                self._ffplay.terminate()
+                ffplay = self._ffplay
+                self._ffplay = None
+                try:
+                    ffplay.terminate()
+                except BaseException as exc:
+                    cleanup_errors.append(("ffplay process", exc))
+            for resource, cleanup_error in cleanup_errors:
+                log.error(
+                    "%s cleanup failed: %s",
+                    resource,
+                    cleanup_error,
+                    exc_info=(
+                        type(cleanup_error),
+                        cleanup_error,
+                        cleanup_error.__traceback__,
+                    ),
+                )
+            if primary_error is None and cleanup_errors:
+                resource, cleanup_error = cleanup_errors[0]
+                raise RuntimeError(
+                    f"{resource} cleanup failed: {cleanup_error}"
+                ) from cleanup_error
 
 
 def _get_offer_msg(session_id):

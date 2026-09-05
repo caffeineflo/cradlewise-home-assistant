@@ -147,6 +147,60 @@ def test_local_bridge_supervisor_retries_without_exiting(monkeypatch, tmp_path):
     assert attempts == 2
 
 
+def test_local_bridge_supervisor_waits_for_attempt_cleanup(monkeypatch, tmp_path):
+    certs_dir = tmp_path / "certs"
+    certs_dir.mkdir()
+    for name in ("ca.pem", "client_cert.pem", "client_key.pem", "device_id"):
+        (certs_dir / name).write_text("test")
+    config = BridgeConfig.from_values(
+        cradle_id="cradle-1",
+        crib_ip="192.0.2.10",
+        certs_dir=certs_dir,
+        output_url="rtsp://127.0.0.1:8554/cradlewise",
+    )
+    store = BridgeStatusStore(cradle_id="cradle-1", crib_ip="192.0.2.10")
+    attempts = 0
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    second_attempt_started = asyncio.Event()
+
+    async def fail_after_cleanup(_config, _sink, _store, _command_handler):
+        nonlocal attempts
+        attempts += 1
+        try:
+            raise RuntimeError("crib unavailable")
+        finally:
+            if attempts == 1:
+                cleanup_started.set()
+                await release_cleanup.wait()
+            else:
+                second_attempt_started.set()
+
+    async def idle_watchdog(*_args, **_kwargs):
+        await asyncio.Future()
+
+    monkeypatch.setattr("cradlewise_local.__main__.run_bridge", fail_after_cleanup)
+    monkeypatch.setattr(
+        "cradlewise_local.__main__.monitor_media_freshness", idle_watchdog
+    )
+    monkeypatch.setattr("cradlewise_local.__main__.RECONNECT_INITIAL_DELAY_SECONDS", 0)
+
+    async def run_supervisor():
+        supervisor = asyncio.create_task(
+            supervise_local_bridge(config, store, command_handler=None)
+        )
+        await cleanup_started.wait()
+        await asyncio.sleep(0)
+        attempts_before_cleanup_finished = attempts
+        release_cleanup.set()
+        await second_attempt_started.wait()
+        supervisor.cancel()
+        await asyncio.gather(supervisor, return_exceptions=True)
+        return attempts_before_cleanup_finished
+
+    assert asyncio.run(run_supervisor()) == 1
+
+
 def test_local_bridge_supervisor_resets_delay_before_retrying_recovered_stream(
     monkeypatch, tmp_path
 ):
