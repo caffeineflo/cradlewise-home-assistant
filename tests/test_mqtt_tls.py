@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import stream_local
+from cradlewise_local.streamer import BridgeStreamer
 from stream_local import CribStreamer, mqtt_server_ca_path
 
 
@@ -245,6 +246,27 @@ async def test_shutdown_ignores_late_mqtt_connect_callback(tmp_path: Path, monke
         0,
         1,
     )
+
+
+def test_bridge_shutdown_ignores_late_mqtt_callbacks():
+    streamer = object.__new__(BridgeStreamer)
+    streamer._shutting_down = True
+    streamer._shadow_subscription_mids = {7}
+
+    class UnexpectedClient:
+        @staticmethod
+        def subscribe(*_args, **_kwargs):
+            raise AssertionError("shutdown callback must not subscribe")
+
+        @staticmethod
+        def publish(*_args, **_kwargs):
+            raise AssertionError("shutdown callback must not publish")
+
+    client = UnexpectedClient()
+    streamer._on_connect(client, None, {}, 0, None)
+    streamer._on_subscribe(client, None, 7, [0], None)
+
+    assert streamer._shadow_subscription_mids == {7}
 
 
 @pytest.mark.asyncio

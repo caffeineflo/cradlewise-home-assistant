@@ -76,6 +76,7 @@ def test_stream_session_filter_matches_app_compatibility_rules():
 
 def test_shadow_get_is_published_only_after_subscription_acknowledgement():
     streamer = object.__new__(BridgeStreamer)
+    streamer._shutting_down = False
     streamer._shadow_subscription_mids = {42}
     streamer.shadow_get_topic = "$aws/things/cradle-1/shadow/get"
     published = []
