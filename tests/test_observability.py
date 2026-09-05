@@ -46,6 +46,30 @@ def test_metrics_contain_only_operational_values() -> None:
     ) == (True, True, True, True, True, True)
 
 
+def test_metrics_expose_local_pid_pressure(monkeypatch) -> None:
+    monkeypatch.setattr(observability, "_process_thread_count", lambda: 51)
+    monkeypatch.setattr(observability, "_cgroup_pid_count", lambda: 82)
+
+    body = observability.render_prometheus_metrics({}).decode()
+
+    assert (
+        "cradlewise_bridge_process_threads 51\n" in body,
+        "cradlewise_bridge_cgroup_pids 82\n" in body,
+    ) == (True, True)
+
+
+def test_unavailable_pid_metrics_are_omitted(monkeypatch) -> None:
+    monkeypatch.setattr(observability, "_process_thread_count", lambda: None)
+    monkeypatch.setattr(observability, "_cgroup_pid_count", lambda: None)
+
+    body = observability.render_prometheus_metrics({}).decode()
+
+    assert (
+        "cradlewise_bridge_process_threads" not in body,
+        "cradlewise_bridge_cgroup_pids" not in body,
+    ) == (True, True)
+
+
 def test_error_reporting_does_not_load_sdk_without_dsn(monkeypatch) -> None:
     def fail_load():
         raise AssertionError("Sentry SDK must not load without an explicit DSN")

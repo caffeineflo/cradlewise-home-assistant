@@ -8,6 +8,7 @@ import re
 import time
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Any, Protocol
 
 BRIDGE_API_VERSION = 1
@@ -49,6 +50,20 @@ def _age_seconds(timestamp: Any, now: float) -> float | None:
     return max(0.0, now - float(timestamp))
 
 
+def _process_thread_count() -> int | None:
+    try:
+        return sum(1 for _entry in Path("/proc/self/task").iterdir())
+    except OSError:
+        return None
+
+
+def _cgroup_pid_count() -> int | None:
+    try:
+        return int(Path("/sys/fs/cgroup/pids.current").read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
 def render_prometheus_metrics(
     snapshot: dict[str, Any],
     *,
@@ -81,6 +96,18 @@ def render_prometheus_metrics(
             "counter",
             "Local bridge reconnect attempts since process start.",
             bridge.get("reconnect_attempts"),
+        ),
+        (
+            "cradlewise_bridge_process_threads",
+            "gauge",
+            "Native threads in the bridge process.",
+            _process_thread_count(),
+        ),
+        (
+            "cradlewise_bridge_cgroup_pids",
+            "gauge",
+            "Processes and threads in the bridge container cgroup.",
+            _cgroup_pid_count(),
         ),
         (
             "cradlewise_bridge_mqtt_connected",

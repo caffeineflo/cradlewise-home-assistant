@@ -47,7 +47,9 @@ CRADLEWISE_METRICS_ENABLED=true
 Then configure any Prometheus-compatible scraper to request `/metrics` with the
 bridge bearer token. The endpoint is pull-only and has no labels. It contains
 only operational values such as health, uptime, reconnects, connection state,
-frame counters, media freshness, sink drops, and state freshness.
+frame counters, media freshness, sink drops, state freshness, process threads,
+and container PID usage. Alert on container PID usage before it reaches the
+deployment's configured limit so a leaked runtime can't exhaust the container.
 
 The endpoint never exposes cradle IDs, crib or bridge addresses, account data,
 Wi-Fi details, baby state, sleep values, MQTT topics, URLs, tokens, or stream
