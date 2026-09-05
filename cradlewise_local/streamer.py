@@ -100,6 +100,8 @@ class BridgeStreamer(CribStreamer):
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         super()._on_connect(client, userdata, flags, reason_code, properties)
+        if self._shutting_down:
+            return
         if reason_code == 0:
             self.status_store.mark_stream_started()
             result, mid = client.subscribe(
@@ -125,6 +127,8 @@ class BridgeStreamer(CribStreamer):
             )
 
     def _on_subscribe(self, client, userdata, mid, reason_code_list, properties):
+        if self._shutting_down:
+            return
         if mid not in self._shadow_subscription_mids:
             return
         self._shadow_subscription_mids.discard(mid)
