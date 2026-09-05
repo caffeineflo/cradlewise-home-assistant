@@ -7,6 +7,22 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-05
+
+### Added
+
+- Expose opt-in Prometheus metrics for the bridge process thread count and
+  container cgroup PID usage.
+
+### Fixed
+
+- Stop and detach each MQTT network loop before asynchronous shutdown work so
+  supervisor retries cannot retain client threads after a failure.
+- Ignore late MQTT callbacks during shutdown instead of repopulating pending
+  signaling state.
+- Release PyAV snapshot decoders between connection attempts to prevent codec
+  worker threads from accumulating across retries.
+
 ## [0.2.1] - 2026-09-04
 
 ### Added
@@ -125,7 +141,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Return safe redacted diagnostics while an entry is temporarily unloaded
   during a reload.
 
-[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/caffeineflo/cradlewise-home-assistant/releases/tag/v0.1.0
