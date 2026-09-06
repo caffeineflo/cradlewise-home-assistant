@@ -7,6 +7,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-09-06
+
+### Added
+
+- Publish and validate the optional bridge image for both `linux/amd64` and
+  `linux/arm64`.
+
 ## [0.2.4] - 2026-09-05
 
 ### Fixed
