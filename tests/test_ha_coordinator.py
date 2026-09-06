@@ -16,7 +16,7 @@ try:
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 except ModuleNotFoundError:
     pytest.skip(
-        "Home Assistant runtime tests require the ha-test extra",
+        "Home Assistant runtime tests require the isolated .ha-test environment",
         allow_module_level=True,
     )
 
