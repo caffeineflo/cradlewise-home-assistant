@@ -38,6 +38,8 @@ publishing it.
    - `packages/cradlewise-client/pyproject.toml`
    - `custom_components/cradlewise/manifest.json`
    - the integration's `cradlewise-client==...` requirement
+   - `.env.example`
+   - the default bridge image in `examples/docker-compose.yaml`
 2. Update `CHANGELOG.md` and move the release notes out of `Unreleased`.
 3. Run the Python 3.10, 3.12, and 3.14 test matrix, Home Assistant runtime
    tests, Ruff, yamllint, hassfest, package builds, and the bridge image build.
@@ -58,9 +60,10 @@ publishing it.
 
 The privileged PyPI job only downloads and publishes the artifact produced by
 the unprivileged build job. The release guard rejects a tag unless it matches
-the client package version, integration version, and pinned integration
-requirement. After PyPI shows the new client version, confirm that a clean HACS
-install can resolve the integration requirement.
+the root and client package versions, integration version and requirement,
+example environment, and Compose bridge default. After PyPI shows the new
+client version, confirm that a clean HACS install can resolve the integration
+requirement.
 
 ### Maintainer live end-to-end gate
 

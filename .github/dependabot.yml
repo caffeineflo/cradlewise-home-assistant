@@ -8,16 +8,6 @@ updates:
       python-dependencies:
         patterns:
           - "*"
-    # The current HA test runtime pins these exact versions. Security alerts
-    # still block releases, while routine upgrades resume with the HA pin bump.
-    ignore:
-      - dependency-name: cryptography
-        versions:
-          - ">48.0.1"
-      - dependency-name: pytest
-        versions:
-          - ">9.0.3"
-
   - package-ecosystem: github-actions
     directory: /
     schedule:

@@ -79,6 +79,17 @@ def test_dependabot_updates_the_uv_lockfile():
     assert "package-ecosystem: uv" in dependabot
 
 
+def test_dependabot_python_updates_are_not_suppressed_by_ha_test_pins():
+    dependabot = Path(".github/dependabot.yml").read_text()
+    python_updates = dependabot.split("package-ecosystem: uv", 1)[1].split(
+        "package-ecosystem: github-actions",
+        1,
+    )[0]
+    project = Path("pyproject.toml").read_text()
+
+    assert "ignore:" not in python_updates and "ha-test =" not in project
+
+
 def test_ci_jobs_have_explicit_timeouts():
     workflow = Path(".github/workflows/tests.yml").read_text()
 
