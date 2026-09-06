@@ -47,6 +47,25 @@ def test_ci_builds_bridge_image_without_publishing():
     assert "docker/build-push-action@" in workflow and "push: false" in workflow
 
 
+def test_ci_and_release_build_bridge_for_amd64_and_arm64():
+    workflows = {
+        "ci": Path(".github/workflows/tests.yml")
+        .read_text()
+        .split("  bridge-image-check:", 1)[1],
+        "release": Path(".github/workflows/release.yml")
+        .read_text()
+        .split("  bridge-image-publish:", 1)[1]
+        .split("  github-release:", 1)[0],
+    }
+
+    assert all(
+        "docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a" in workflow
+        and "with:\n          platforms: arm64" in workflow
+        and "platforms: linux/amd64,linux/arm64" in workflow
+        for workflow in workflows.values()
+    )
+
+
 def test_ci_actions_are_pinned_to_full_commit_shas():
     workflows = "\n".join(
         path.read_text() for path in Path(".github/workflows").glob("*.yml")
