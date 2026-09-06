@@ -1145,7 +1145,7 @@ wheels = [
 
 [[package]]
 name = "cradlewise-client"
-version = "0.2.2"
+version = "0.2.3"
 source = { editable = "packages/cradlewise-client" }
 dependencies = [
     { name = "boto3" },
@@ -1166,7 +1166,7 @@ requires-dist = [
 
 [[package]]
 name = "cradlewise-local"
-version = "0.2.2"
+version = "0.2.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiortc" },
