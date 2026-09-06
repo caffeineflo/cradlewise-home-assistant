@@ -209,11 +209,18 @@ class LocalCradleClient:
 
         self._stopping = True
         self._mqtt = None
+        cleanup_errors: list[BaseException] = []
         try:
-            await asyncio.to_thread(client.disconnect)
-        finally:
+            try:
+                await asyncio.to_thread(client.disconnect)
+            except BaseException as error:
+                cleanup_errors.append(error)
             if self._mqtt_loop_started:
-                await asyncio.to_thread(client.loop_stop)
+                try:
+                    await asyncio.to_thread(client.loop_stop)
+                except BaseException as error:
+                    cleanup_errors.append(error)
+        finally:
             self._mqtt_loop_started = False
             self._set_connected(False)
             if self._connected_future is not None:
@@ -221,6 +228,13 @@ class LocalCradleClient:
             self._connected_future = None
             self._loop = None
             self._state_subscription_mids.clear()
+        if cleanup_errors:
+            for error in cleanup_errors[1:]:
+                _LOGGER.error(
+                    "Additional local Cradlewise MQTT cleanup failed",
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+            raise cleanup_errors[0]
 
     def publish_shadow(self, payload: dict[str, Any]) -> None:
         """Publish an APK-shaped desired shadow update without retrying it."""
