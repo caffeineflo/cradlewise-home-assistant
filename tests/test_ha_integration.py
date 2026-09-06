@@ -696,6 +696,36 @@ async def test_media_options_validate_identity_and_derive_endpoints(
     assert result["data"][CONF_ALLOW_INSECURE_HTTP] is True
 
 
+@pytest.mark.parametrize(
+    "bridge_url",
+    ["http://bridge.test:notaport", "http://bridge.test:99999"],
+)
+async def test_media_options_reject_malformed_ports_without_crashing(
+    hass: HomeAssistant,
+    bridge_url: str,
+) -> None:
+    flow = CradlewiseOptionsFlow(
+        MockConfigEntry(
+            domain=DOMAIN,
+            title="Nursery Crib",
+            unique_id=CRADLE_ID,
+            data=_base_entry_data(),
+            version=1,
+        )
+    )
+    flow.hass = hass
+
+    result = await flow.async_step_media(
+        {
+            CONF_BRIDGE_STATUS_URL: bridge_url,
+            CONF_BEARER_TOKEN: TOKEN,
+            CONF_ALLOW_INSECURE_HTTP: True,
+        }
+    )
+
+    assert result["errors"] == {"base": "invalid_bridge_status_url"}
+
+
 async def test_media_options_reject_a_different_cradle(
     hass: HomeAssistant,
     aioclient_mock: Any,
