@@ -264,6 +264,32 @@ async def test_stop_reports_disconnected_once(client_parts):
     assert connection_states == [True, False]
 
 
+async def test_callbacks_after_shutdown_begins_do_not_restore_state(client_parts):
+    client, mqtt_client, updates, connection_states = client_parts
+    await client.async_start()
+    published_before_shutdown = list(mqtt_client.published)
+    client._stopping = True
+
+    mqtt_client.on_connect(mqtt_client, None, {}, 0, None)
+    mqtt_client.on_subscribe(mqtt_client, None, 7, [0] * 6, None)
+    mqtt_client.on_message(
+        mqtt_client,
+        None,
+        SimpleNamespace(
+            topic=client.shadow_get_accepted_topic,
+            payload=b'{"state":{"reported":{"babyPresent":false}}}',
+        ),
+    )
+    await asyncio.sleep(0)
+
+    assert (
+        mqtt_client.published,
+        updates,
+        connection_states,
+    ) == (published_before_shutdown, [], [True])
+    await client.async_stop()
+
+
 def test_credentials_prefer_pinned_server_ca(tmp_path: Path):
     for name in ("ca.pem", "server_ca.pem", "client_cert.pem", "client_key.pem"):
         (tmp_path / name).write_text(name, encoding="utf-8")

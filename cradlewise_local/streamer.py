@@ -6,7 +6,6 @@ import asyncio
 import io
 import json
 import logging
-import threading
 import time
 from typing import Any
 
@@ -80,7 +79,6 @@ class BridgeStreamer(CribStreamer):
         )
         self._snapshot_decoder = av.CodecContext.create("h264", "r")
         self._last_snapshot_update = 0.0
-        self._command_lock = threading.Lock()
         self._shadow_subscription_mids: set[int] = set()
 
     def release_media_resources(self) -> None:
@@ -206,13 +204,13 @@ class BridgeStreamer(CribStreamer):
 
     def publish_shadow_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Publish a desired-state payload to the local shadow update topic."""
-        if self._mqtt is None or not self._mqtt.is_connected():
-            raise RuntimeError("MQTT is not connected")
-
         data = json.dumps(payload, separators=(",", ":"))
         log.info("Publishing command to %s", self.shadow_update_topic)
-        with self._command_lock:
-            result = self._mqtt.publish(self.shadow_update_topic, data)
+        with self._mqtt_lock:
+            client = self._mqtt
+            if client is None or not client.is_connected():
+                raise RuntimeError("MQTT is not connected")
+            result = client.publish(self.shadow_update_topic, data)
         if result.rc != MQTT_ERR_SUCCESS:
             raise RuntimeError(f"MQTT publish failed with rc={result.rc}")
         return payload

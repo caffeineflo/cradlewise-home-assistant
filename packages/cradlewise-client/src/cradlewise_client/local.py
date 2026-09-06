@@ -241,6 +241,8 @@ class LocalCradleClient:
             )
 
     def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
+        if self._stopping:
+            return
         if reason_code != 0:
             self._dispatch_connection_error(
                 LocalConnectionError(f"local MQTT CONNACK failed: {reason_code}")
@@ -286,6 +288,8 @@ class LocalCradleClient:
         reason_code_list,
         properties,
     ) -> None:
+        if self._stopping:
+            return
         if mid not in self._state_subscription_mids:
             return
         self._state_subscription_mids.discard(mid)
@@ -305,6 +309,8 @@ class LocalCradleClient:
         self._dispatch_connected()
 
     def _on_message(self, client, userdata, message) -> None:
+        if self._stopping:
+            return
         topic = message.topic
         kinds = {
             self.beacon_topic: "beacon",

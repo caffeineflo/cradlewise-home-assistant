@@ -269,6 +269,33 @@ def test_bridge_shutdown_ignores_late_mqtt_callbacks():
     assert streamer._shadow_subscription_mids == {7}
 
 
+def test_bridge_command_keeps_the_client_checked_before_publish():
+    streamer = object.__new__(BridgeStreamer)
+    streamer.shadow_update_topic = "$aws/things/cradle-1/shadow/update"
+    streamer._mqtt_lock = threading.Lock()
+    published = []
+
+    class DetachingClient:
+        @staticmethod
+        def is_connected():
+            streamer._mqtt = None
+            return True
+
+        @staticmethod
+        def publish(topic, payload):
+            published.append((topic, payload))
+            return SimpleNamespace(rc=0)
+
+    streamer._mqtt = DetachingClient()
+
+    result = streamer.publish_shadow_payload({"state": {"desired": {"bounceLevel": 2}}})
+
+    assert (result, len(published)) == (
+        {"state": {"desired": {"bounceLevel": 2}}},
+        1,
+    )
+
+
 @pytest.mark.asyncio
 async def test_mqtt_disconnect_failure_does_not_skip_remaining_cleanup(
     tmp_path: Path, monkeypatch
