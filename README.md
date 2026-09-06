@@ -234,7 +234,9 @@ uv run python fetch_certs.py
 
 The script prompts for your Cradlewise email and password. You can also set
 `CRADLEWISE_EMAIL` and `CRADLEWISE_PASSWORD` in your shell if you're running it
-non-interactively.
+non-interactively. It uses the same randomized Android-compatible registration
+and secure credential writer as the Home Assistant integration. Use
+`--timezone` or `--country` if the `TZ`/UTC and `US` defaults are not appropriate.
 
 Cribs running newer Greengrass v2 firmware present a rotating MQTT broker
 certificate signed by a separate, long-lived core CA. Pin that CA once from
