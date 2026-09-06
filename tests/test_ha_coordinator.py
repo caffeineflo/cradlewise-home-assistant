@@ -108,6 +108,31 @@ async def test_start_materializes_credentials_outside_event_loop(
     assert materialize_thread_id != threading.get_ident()
 
 
+async def test_stop_removes_credentials_when_provider_cleanup_fails(
+    hass: HomeAssistant,
+    tmp_path,
+) -> None:
+    coordinator = CradlewiseCoordinator(hass, _entry())
+    credential_directory = tmp_path / "credentials"
+    credential_directory.mkdir()
+    (credential_directory / "client_key.pem").write_text(
+        "private key",
+        encoding="utf-8",
+    )
+    coordinator._credential_directory = credential_directory
+    coordinator._local_client = SimpleNamespace(
+        async_stop=AsyncMock(side_effect=RuntimeError("disconnect failed"))
+    )
+
+    with pytest.raises(RuntimeError, match="disconnect failed"):
+        await coordinator.async_stop()
+
+    assert (
+        credential_directory.exists(),
+        coordinator._credential_directory,
+    ) == (False, None)
+
+
 async def test_media_companion_is_the_only_local_command_publisher(
     hass: HomeAssistant,
     aioclient_mock: Any,

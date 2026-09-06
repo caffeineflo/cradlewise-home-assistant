@@ -336,11 +336,42 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for client in (self._local_client, self._cloud_client)
             if client is not None
         ]
-        if clients:
-            await asyncio.gather(*(client.async_stop() for client in clients))
-        if self._credential_directory is not None:
-            await asyncio.to_thread(shutil.rmtree, self._credential_directory)
-            self._credential_directory = None
+        provider_error: BaseException | None = None
+        credential_error: BaseException | None = None
+        try:
+            if clients:
+                results = await asyncio.gather(
+                    *(client.async_stop() for client in clients),
+                    return_exceptions=True,
+                )
+                errors = [
+                    result for result in results if isinstance(result, BaseException)
+                ]
+                if errors:
+                    provider_error = errors[0]
+                    for error in errors[1:]:
+                        _LOGGER.error(
+                            "Additional Cradlewise provider cleanup failed",
+                            exc_info=(type(error), error, error.__traceback__),
+                        )
+        except BaseException as error:
+            provider_error = error
+        finally:
+            directory = self._credential_directory
+            if directory is not None:
+                try:
+                    await asyncio.to_thread(shutil.rmtree, directory)
+                except BaseException as error:
+                    credential_error = error
+                else:
+                    self._credential_directory = None
+
+        if credential_error is not None:
+            if provider_error is not None:
+                raise credential_error from provider_error
+            raise credential_error
+        if provider_error is not None:
+            raise provider_error
 
     async def _async_update_data(self) -> dict[str, Any]:
         errors: list[str] = []
