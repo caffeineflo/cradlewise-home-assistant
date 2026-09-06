@@ -7,6 +7,34 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-09-05
+
+### Added
+
+- Check the example environment and Compose bridge versions as part of static
+  tests and tag release validation.
+
+### Changed
+
+- Use the packaged client registration and secure credential materialization
+  flow from the standalone certificate helper.
+- Document that the optional published bridge image currently targets amd64.
+- Hold routine dependency updates at the exact cryptography and pytest versions
+  required by the current Home Assistant test runtime; vulnerability alerts
+  continue to block releases.
+
+### Fixed
+
+- Synchronize local MQTT command publication with shutdown detachment so a
+  concurrent bridge restart cannot dereference a removed Paho client.
+- Ignore local state-client callbacks after shutdown begins.
+- Remove temporary Home Assistant credential files even when provider cleanup
+  fails, while preserving the original cleanup error.
+- Reject malformed and out-of-range media companion ports without crashing or
+  treating the input as a request to remove media.
+- Keep the copied example environment on the same bridge version as the
+  integration release.
+
 ## [0.2.2] - 2026-09-05
 
 ### Added
@@ -141,7 +169,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Return safe redacted diagnostics while an entry is temporarily unloaded
   during a reload.
 
-[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.1.0...v0.2.0
