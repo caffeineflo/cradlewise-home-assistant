@@ -20,6 +20,7 @@ import signal
 import socket
 import ssl
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -364,6 +365,7 @@ class CribStreamer:
         self._mqtt_reconnect_handle = None
         self._shutting_down = False
         self._frame_count = 0
+        self._mqtt_lock = threading.Lock()
 
     # -- MQTT layer --
 
@@ -518,7 +520,11 @@ class CribStreamer:
     def _publish(self, payload):
         data = json.dumps(payload)
         log.debug("MQTT TX: %s", data[:200])
-        result = self._mqtt.publish(self.topic, data)
+        with self._mqtt_lock:
+            client = self._mqtt
+            if client is None:
+                raise RuntimeError("MQTT is not connected")
+            result = client.publish(self.topic, data)
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
             raise RuntimeError(f"MQTT signaling publish failed with rc={result.rc}")
 
@@ -846,7 +852,9 @@ class CribStreamer:
                 self._keepalive_task.cancel()
             for task in tuple(self._track_tasks):
                 task.cancel()
-            mqtt_client = self._mqtt
+            with self._mqtt_lock:
+                mqtt_client = self._mqtt
+                self._mqtt = None
             if mqtt_client is not None:
                 try:
                     mqtt_client.disconnect()
@@ -857,7 +865,6 @@ class CribStreamer:
                         mqtt_client.loop_stop()
                     except BaseException as exc:
                         cleanup_errors.append(("MQTT network loop", exc))
-            self._mqtt = None
             if message_task is not None:
                 try:
                     await asyncio.gather(message_task, return_exceptions=True)
