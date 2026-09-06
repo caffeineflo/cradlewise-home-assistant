@@ -118,7 +118,9 @@ def health_url_from_status_url(value: str) -> str:
 
 def bridge_base_url(value: str) -> str:
     """Return a configuration URL without a bridge endpoint or credentials."""
-    parsed = urlsplit(value)
+    parsed = _parsed_url(value, {"http", "https"})
+    if parsed is None:
+        return ""
     parts = [part for part in parsed.path.split("/") if part]
     if parts and parts[-1] in KNOWN_ENDPOINTS:
         parts.pop()

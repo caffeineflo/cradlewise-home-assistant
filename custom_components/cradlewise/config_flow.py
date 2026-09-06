@@ -657,14 +657,15 @@ class CradlewiseOptionsFlow(OptionsFlow):
         current = {**self._entry.data, **self._entry.options}
         errors: dict[str, str] = {}
         if user_input is not None:
-            bridge_url = bridge_base_url(
-                str(user_input.get(CONF_BRIDGE_STATUS_URL, "")).strip()
-            )
-            if not bridge_url:
+            supplied_bridge_url = str(
+                user_input.get(CONF_BRIDGE_STATUS_URL, "")
+            ).strip()
+            if not supplied_bridge_url:
                 return self.async_create_entry(title="", data={})
-            if not is_http_url(bridge_url):
+            if not is_http_url(supplied_bridge_url):
                 errors["base"] = "invalid_bridge_status_url"
             else:
+                bridge_url = bridge_base_url(supplied_bridge_url)
                 if not http_url_uses_tls(bridge_url):
                     try:
                         is_private = await self.hass.async_add_executor_job(
