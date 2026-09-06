@@ -8,7 +8,7 @@ By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 Use Python 3.10 or newer and install the locked development environment:
 
 ```bash
-uv sync --extra test --extra ha-test
+uv sync --extra test
 ```
 
 Run the same core checks used by CI:
@@ -17,6 +17,16 @@ Run the same core checks used by CI:
 uv run --locked --extra test python -m pytest
 uv run --locked --extra test ruff check .
 uv run --locked --extra test ruff format --check .
+```
+
+Home Assistant pins its own Python dependency graph, so its runtime tests use a
+separate environment rather than the bridge's lockfile. Follow the
+`home-assistant-versions` job in `.github/workflows/tests.yml` to create
+`.ha-test` with the current supported Home Assistant test package, then run:
+
+```bash
+.ha-test/bin/python -m pytest \
+  tests/test_ha_integration.py tests/test_ha_coordinator.py
 ```
 
 Changes to the Home Assistant integration must keep the `cradlewise`

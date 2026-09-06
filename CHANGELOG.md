@@ -19,9 +19,9 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Use the packaged client registration and secure credential materialization
   flow from the standalone certificate helper.
 - Document that the optional published bridge image currently targets amd64.
-- Hold routine dependency updates at the exact cryptography and pytest versions
-  required by the current Home Assistant test runtime; vulnerability alerts
-  continue to block releases.
+- Keep Home Assistant runtime tests in their existing isolated environment so
+  Dependabot can update the bridge/client lockfile without conflicting with
+  Home Assistant's exact dependency pins.
 
 ### Fixed
 
@@ -36,6 +36,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   treating the input as a request to remove media.
 - Keep the copied example environment on the same bridge version as the
   integration release.
+- Remove a newly created cloud registration and partial credential directory
+  when the standalone helper cannot save provisioned credentials.
 
 ## [0.2.2] - 2026-09-05
 
