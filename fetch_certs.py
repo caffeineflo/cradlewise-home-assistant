@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import shutil
 from pathlib import Path
 
 from cradlewise_client.certificates import materialize_credentials
@@ -80,10 +81,35 @@ def main(argv: list[str] | None = None) -> int:
             timezone=args.timezone,
             country=args.country,
         )
-        output_directory = args.output_dir / account.cradle_id
-        materialize_credentials(output_directory, credentials)
     except (CloudAuthenticationError, CloudApiError, OSError) as error:
         print(f"Credential provisioning failed: {error}")
+        return 1
+
+    output_directory = args.output_dir / account.cradle_id
+    output_existed = output_directory.exists()
+    try:
+        materialize_credentials(output_directory, credentials)
+    except OSError as error:
+        rollback_errors = []
+        if not output_existed and output_directory.exists():
+            try:
+                shutil.rmtree(output_directory)
+            except OSError as rollback_error:
+                rollback_errors.append(rollback_error)
+        try:
+            removed = cloud.remove_user_devices(account, [credentials.device_id])
+            if removed != [credentials.device_id]:
+                rollback_errors.append(
+                    CloudApiError(
+                        "Cradlewise did not confirm removal of the new registration"
+                    )
+                )
+        except (CloudAuthenticationError, CloudApiError, OSError) as rollback_error:
+            rollback_errors.append(rollback_error)
+
+        print(f"Credential provisioning failed: {error}")
+        for rollback_error in rollback_errors:
+            print(f"Credential rollback failed: {rollback_error}")
         return 1
 
     print(f"Credentials saved to {output_directory}")
