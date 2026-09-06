@@ -52,3 +52,17 @@ def test_bridge_consumes_the_workspace_client_instead_of_bundling_it() -> None:
 
     assert 'packages = ["cradlewise_local"]' in root
     assert "cradlewise-client = {workspace = true}" in root
+
+
+def test_root_sdist_includes_only_the_installable_bridge_sources() -> None:
+    root = Path("pyproject.toml").read_text(encoding="utf-8")
+    section = root.split("[tool.hatch.build.targets.sdist]", 1)[1].split("\n[", 1)[0]
+
+    assert set(re.findall(r'"(/[^"]+)"', section)) == {
+        "/LICENSE",
+        "/README.md",
+        "/cradlewise_api.py",
+        "/cradlewise_local",
+        "/pyproject.toml",
+        "/stream_local.py",
+    }

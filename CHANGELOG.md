@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-09-05
+
+### Fixed
+
+- Limit the unpublished root source distribution to installable bridge sources
+  and required package metadata so local scratch files cannot enter a future
+  package artifact.
+
 ## [0.2.3] - 2026-09-05
 
 ### Added
