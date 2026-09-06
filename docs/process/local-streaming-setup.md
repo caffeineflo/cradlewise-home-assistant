@@ -13,16 +13,15 @@ How to set up and run the local video stream from a Cradlewise crib.
 # Install ffmpeg (macOS)
 brew install ffmpeg
 
-# Create Python venv and install dependencies
+# Install the locked project dependencies
 cd /path/to/cradlewise
-python3 -m venv .venv
-.venv/bin/pip install boto3 requests pycognito paho-mqtt aiortc numpy
+uv sync
 ```
 
 ## Step 1: Fetch Device Certificates (One-Time)
 
 ```bash
-.venv/bin/python3 fetch_certs.py
+uv run python fetch_certs.py
 ```
 
 Enter your Cradlewise email and password when prompted (or set
@@ -32,21 +31,16 @@ The script will:
 
 1. Authenticate with Cognito
 2. Look up your baby profile and cradle ID
-3. Download device certificates from S3
-4. Save them to `certs/{cradle_id}/`
+3. Register a randomized Android-compatible client with no push token
+4. Download device certificates from S3
+5. Save them with restrictive permissions to `certs/{cradle_id}/`
 
 Output looks like:
 
 ```
 Authenticating as you@example.com...
-Cognito auth successful.
-AWS credentials obtained.
-Selected: BabyName (baby_id=12345, cradle_id=405c26b8-...)
-Device config received for cradle: 405c26b8-...
-  Saved CA cert: certs/405c26b8-.../ca.pem
-  Saved: certs/405c26b8-.../client_cert.pem
-  Saved: certs/405c26b8-.../client_key.pem
-  Saved device ID: certs/405c26b8-.../device_id
+Credentials saved to certs/405c26b8-...
+Pin the crib's broker CA before connecting across the local network.
 ```
 
 **Note:** After the first run, the Greengrass deployment on the crib may take
@@ -89,20 +83,20 @@ Ways to find it:
 
 ```bash
 # Auto-discover (same subnet only)
-.venv/bin/python3 stream_local.py --cradle-id <cradle_id>
+uv run python stream_local.py --cradle-id <cradle_id>
 
 # Manual IP (works cross-VLAN)
-.venv/bin/python3 stream_local.py --cradle-id <cradle_id> --ip <crib_ip>
+uv run python stream_local.py --cradle-id <cradle_id> --ip <crib_ip>
 
 # Verbose output (for debugging)
-.venv/bin/python3 stream_local.py --cradle-id <cradle_id> --ip <crib_ip> -v
+uv run python stream_local.py --cradle-id <cradle_id> --ip <crib_ip> -v
 ```
 
 An ffplay window will open showing the live video feed.
 
 **Example:**
 ```bash
-.venv/bin/python3 stream_local.py \
+uv run python stream_local.py \
   --cradle-id 00000000-0000-4000-8000-000000000000 \
   --ip 192.0.2.10
 ```
