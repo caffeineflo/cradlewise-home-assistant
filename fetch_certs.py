@@ -68,42 +68,113 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _cleanup_directory(directory: Path, label: str) -> str | None:
+    """Remove one temporary directory and describe any cleanup failure."""
+    try:
+        if directory.exists():
+            shutil.rmtree(directory)
+    except OSError as error:
+        return f"{label} could not be removed from {directory}: {error}"
+    return None
+
+
+def _report_cleanup_warning(warning: str | None) -> None:
+    if warning is not None:
+        print(f"Warning: {warning}")
+
+
 def _materialize_atomically(
     output_directory: Path,
     credentials: ProvisionedCredentials,
-) -> None:
+) -> str | None:
     """Replace a credential bundle only after every new file is written."""
     output_directory.parent.mkdir(parents=True, exist_ok=True)
+    server_ca_path = output_directory / "server_ca.pem"
+    server_ca_certificate = (
+        server_ca_path.read_text(encoding="utf-8") if server_ca_path.is_file() else None
+    )
     staging_directory = Path(
         tempfile.mkdtemp(
             prefix=f".{output_directory.name}-staging-",
             dir=output_directory.parent,
         )
     )
-    backup_root = None
-    previous_directory = None
     try:
-        materialize_credentials(staging_directory, credentials)
-        if output_directory.exists():
-            backup_root = Path(
-                tempfile.mkdtemp(
-                    prefix=f".{output_directory.name}-backup-",
-                    dir=output_directory.parent,
-                )
-            )
-            previous_directory = backup_root / "credentials"
-            output_directory.replace(previous_directory)
+        materialize_credentials(
+            staging_directory,
+            credentials,
+            server_ca_certificate=server_ca_certificate,
+        )
+    except BaseException:
+        _report_cleanup_warning(
+            _cleanup_directory(staging_directory, "Staged credentials")
+        )
+        raise
+
+    if not output_directory.exists():
         try:
             staging_directory.replace(output_directory)
-        except BaseException:
-            if previous_directory is not None and not output_directory.exists():
-                previous_directory.replace(output_directory)
+        except OSError:
+            _report_cleanup_warning(
+                _cleanup_directory(staging_directory, "Staged credentials")
+            )
             raise
-    finally:
-        if staging_directory.exists():
-            shutil.rmtree(staging_directory)
-        if backup_root is not None and backup_root.exists():
-            shutil.rmtree(backup_root)
+        return None
+
+    try:
+        backup_root = Path(
+            tempfile.mkdtemp(
+                prefix=f".{output_directory.name}-backup-",
+                dir=output_directory.parent,
+            )
+        )
+    except OSError:
+        _report_cleanup_warning(
+            _cleanup_directory(staging_directory, "Staged credentials")
+        )
+        raise
+    previous_directory = backup_root / "credentials"
+    try:
+        output_directory.replace(previous_directory)
+    except OSError:
+        _report_cleanup_warning(
+            _cleanup_directory(staging_directory, "Staged credentials")
+        )
+        _report_cleanup_warning(
+            _cleanup_directory(backup_root, "Empty credential backup")
+        )
+        raise
+
+    try:
+        staging_directory.replace(output_directory)
+    except OSError as install_error:
+        try:
+            previous_directory.replace(output_directory)
+        except OSError as restore_error:
+            _report_cleanup_warning(
+                _cleanup_directory(staging_directory, "Staged credentials")
+            )
+            raise OSError(
+                f"New credentials could not be installed: {install_error}. "
+                "Previous credentials remain at "
+                f"{previous_directory} because restoration failed: {restore_error}"
+            ) from restore_error
+
+        _report_cleanup_warning(
+            _cleanup_directory(staging_directory, "Staged credentials")
+        )
+        _report_cleanup_warning(
+            _cleanup_directory(backup_root, "Empty credential backup")
+        )
+        raise
+
+    cleanup_warning = _cleanup_directory(backup_root, "Previous credentials")
+    if cleanup_warning is None:
+        return None
+    return (
+        f"{cleanup_warning}. Remove that backup manually after confirming the new "
+        "credentials work."
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -127,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
 
     output_directory = args.output_dir / account.cradle_id
     try:
-        _materialize_atomically(output_directory, credentials)
+        cleanup_warning = _materialize_atomically(output_directory, credentials)
     except OSError as error:
         rollback_errors = []
         try:
@@ -147,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"Credentials saved to {output_directory}")
+    _report_cleanup_warning(cleanup_warning)
     print("Pin the crib's broker CA before connecting across the local network.")
     return 0
 
