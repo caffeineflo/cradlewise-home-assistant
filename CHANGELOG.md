@@ -28,6 +28,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Synchronize local MQTT command publication with shutdown detachment so a
   concurrent bridge restart cannot dereference a removed Paho client.
 - Ignore local state-client callbacks after shutdown begins.
+- Complete state-only MQTT client cleanup even when Paho disconnect or loop
+  shutdown reports an error.
 - Remove temporary Home Assistant credential files even when provider cleanup
   fails, while preserving the original cleanup error.
 - Reject malformed and out-of-range media companion ports without crashing or

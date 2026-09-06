@@ -26,6 +26,7 @@ class FakeMqttClient:
         self.published = []
         self.loop_started = False
         self.loop_stopped = False
+        self.loop_stop_error = None
         self.on_connect = None
         self.on_disconnect = None
         self.on_message = None
@@ -54,6 +55,8 @@ class FakeMqttClient:
 
     def loop_stop(self):
         self.loop_stopped = True
+        if self.loop_stop_error is not None:
+            raise self.loop_stop_error
 
     def disconnect(self):
         self.on_disconnect(self, None, {}, 0, None)
@@ -262,6 +265,26 @@ async def test_stop_reports_disconnected_once(client_parts):
     await client.async_stop()
 
     assert connection_states == [True, False]
+
+
+async def test_loop_stop_failure_does_not_skip_client_state_cleanup(client_parts):
+    client, mqtt_client, _updates, connection_states = client_parts
+    await client.async_start()
+    client._state_subscription_mids.add(99)
+    mqtt_client.loop_stop_error = RuntimeError("loop stop failed")
+
+    with pytest.raises(RuntimeError, match="loop stop failed"):
+        await client.async_stop()
+
+    assert (
+        client.started,
+        client.connected,
+        client._mqtt_loop_started,
+        client._loop,
+        client._connected_future,
+        client._state_subscription_mids,
+        connection_states,
+    ) == (False, False, False, None, None, set(), [True, False])
 
 
 async def test_callbacks_after_shutdown_begins_do_not_restore_state(client_parts):
