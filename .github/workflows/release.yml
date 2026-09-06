@@ -219,12 +219,18 @@ jobs:
         run: |
           set -euo pipefail
           expected_version="${GITHUB_REF_NAME#v}"
+          root_version=$(uv version --package cradlewise-local --short)
           client_version=$(uv version --package cradlewise-client --short)
           integration_version=$(python -c 'import json; print(json.load(open("custom_components/cradlewise/manifest.json"))["version"])')
           integration_requirement=$(python -c 'import json; print(json.load(open("custom_components/cradlewise/manifest.json"))["requirements"][0])')
+          environment_version=$(sed -n 's/^CRADLEWISE_BRIDGE_VERSION=//p' .env.example)
+          compose_version=$(sed -n 's/.*CRADLEWISE_BRIDGE_VERSION:-\([^}]*\).*/\1/p' examples/docker-compose.yaml)
+          test "$root_version" = "$expected_version"
           test "$client_version" = "$expected_version"
           test "$integration_version" = "$expected_version"
           test "$integration_requirement" = "cradlewise-client==$expected_version"
+          test "$environment_version" = "$expected_version"
+          test "$compose_version" = "$expected_version"
 
       - name: Build client distribution
         run: uv build --package cradlewise-client

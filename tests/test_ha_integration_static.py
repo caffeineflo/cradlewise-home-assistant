@@ -83,6 +83,30 @@ def test_release_versions_are_synchronized() -> None:
     )
 
 
+def test_bridge_examples_use_the_integration_release() -> None:
+    manifest = json.loads(
+        (INTEGRATION_PATH / "manifest.json").read_text(encoding="utf-8")
+    )
+    environment = Path(".env.example").read_text(encoding="utf-8")
+    compose = Path("examples/docker-compose.yaml").read_text(encoding="utf-8")
+    environment_version = re.search(
+        r"^CRADLEWISE_BRIDGE_VERSION=([^\n]+)$",
+        environment,
+        re.MULTILINE,
+    )
+    compose_version = re.search(
+        r"CRADLEWISE_BRIDGE_VERSION:-([^}]+)",
+        compose,
+    )
+
+    assert environment_version is not None
+    assert compose_version is not None
+    assert (environment_version.group(1), compose_version.group(1)) == (
+        manifest["version"],
+        manifest["version"],
+    )
+
+
 def test_repository_contains_exactly_one_custom_integration_manifest() -> None:
     manifests = sorted(Path("custom_components").glob("*/manifest.json"))
 
