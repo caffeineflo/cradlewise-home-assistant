@@ -359,8 +359,9 @@ Registry:
 ghcr.io/caffeineflo/cradlewise-local-bridge
 ```
 
-The published bridge image currently supports `linux/amd64`. The Home Assistant
-integration itself remains architecture-independent, and the bridge is optional.
+The published bridge image supports `linux/amd64` and `linux/arm64`. The Home
+Assistant integration itself remains architecture-independent, and the bridge is
+optional.
 
 Published tags include the release tag, its semantic version aliases, and the
 short git SHA. For a server deployment, pull a published release version and
