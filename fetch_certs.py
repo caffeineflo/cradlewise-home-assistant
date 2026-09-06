@@ -7,6 +7,7 @@ import argparse
 import getpass
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 from cradlewise_client.certificates import materialize_credentials
@@ -15,6 +16,7 @@ from cradlewise_client.cloud import (
     CloudApiError,
     CloudAuthenticationError,
     CradleAccount,
+    ProvisionedCredentials,
 )
 
 
@@ -66,6 +68,44 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _materialize_atomically(
+    output_directory: Path,
+    credentials: ProvisionedCredentials,
+) -> None:
+    """Replace a credential bundle only after every new file is written."""
+    output_directory.parent.mkdir(parents=True, exist_ok=True)
+    staging_directory = Path(
+        tempfile.mkdtemp(
+            prefix=f".{output_directory.name}-staging-",
+            dir=output_directory.parent,
+        )
+    )
+    backup_root = None
+    previous_directory = None
+    try:
+        materialize_credentials(staging_directory, credentials)
+        if output_directory.exists():
+            backup_root = Path(
+                tempfile.mkdtemp(
+                    prefix=f".{output_directory.name}-backup-",
+                    dir=output_directory.parent,
+                )
+            )
+            previous_directory = backup_root / "credentials"
+            output_directory.replace(previous_directory)
+        try:
+            staging_directory.replace(output_directory)
+        except BaseException:
+            if previous_directory is not None and not output_directory.exists():
+                previous_directory.replace(output_directory)
+            raise
+    finally:
+        if staging_directory.exists():
+            shutil.rmtree(staging_directory)
+        if backup_root is not None and backup_root.exists():
+            shutil.rmtree(backup_root)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Authenticate, register one client, and save its MQTT credentials."""
     args = _parser().parse_args(argv)
@@ -86,16 +126,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     output_directory = args.output_dir / account.cradle_id
-    output_existed = output_directory.exists()
     try:
-        materialize_credentials(output_directory, credentials)
+        _materialize_atomically(output_directory, credentials)
     except OSError as error:
         rollback_errors = []
-        if not output_existed and output_directory.exists():
-            try:
-                shutil.rmtree(output_directory)
-            except OSError as rollback_error:
-                rollback_errors.append(rollback_error)
         try:
             removed = cloud.remove_user_devices(account, [credentials.device_id])
             if removed != [credentials.device_id]:
