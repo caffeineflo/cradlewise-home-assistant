@@ -36,8 +36,9 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   treating the input as a request to remove media.
 - Keep the copied example environment on the same bridge version as the
   integration release.
-- Stage credential files before replacing an existing bundle, and remove the
-  new cloud registration when the standalone helper cannot save them.
+- Stage credential files before replacing an existing bundle, preserve its
+  pinned broker CA, and remove the new cloud registration when the standalone
+  helper cannot save them.
 
 ## [0.2.2] - 2026-09-05
 
