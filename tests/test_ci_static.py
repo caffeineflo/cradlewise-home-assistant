@@ -24,6 +24,21 @@ def test_dockerfile_installs_mqtt_ca_pin_console_script():
     assert "test -x /app/.venv/bin/cradlewise-pin-mqtt-ca" in source_stage
 
 
+def test_dockerfile_smoke_tests_native_runtime_imports():
+    dockerfile = Path("Dockerfile").read_text()
+
+    assert (
+        'python -c "import aiortc, boto3, cryptography.x509, cradlewise_local"'
+        in dockerfile
+    )
+
+
+def test_dockerfile_avoids_unreliable_arm64_openssl_capability_detection():
+    dockerfile = Path("Dockerfile").read_text()
+
+    assert "OPENSSL_armcap=0" in dockerfile
+
+
 def test_dockerfile_and_ci_include_the_standalone_client_package():
     dockerfile = Path("Dockerfile").read_text()
     workflow = Path(".github/workflows/tests.yml").read_text()
