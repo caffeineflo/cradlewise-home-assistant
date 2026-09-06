@@ -7,6 +7,15 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-09-06
+
+### Fixed
+
+- Prevent an illegal-instruction fault on ARM64 hypervisors that advertise
+  OpenSSL CPU capabilities they cannot execute.
+- Import native runtime dependencies while building each bridge architecture so
+  an unusable image cannot pass CI or be published.
+
 ## [0.2.5] - 2026-09-06
 
 ### Added
