@@ -2,48 +2,41 @@
 
 from __future__ import annotations
 
+import math
+import re
 from typing import Any
 
-from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from . import CradlewiseConfigEntry
 from .const import (
-    CONF_BABY_ID,
-    CONF_BEARER_TOKEN,
     CONF_BRIDGE_API_VERSION,
     CONF_BRIDGE_STATUS_URL,
     CONF_BRIDGE_VERSION,
-    CONF_CLIENT_CERTIFICATE,
-    CONF_CLIENT_PRIVATE_KEY,
-    CONF_CRADLE_ID,
-    CONF_DEVICE_ID,
-    CONF_EMAIL,
-    CONF_GROUP_CA_CERTIFICATE,
-    CONF_LOCAL_HOST,
-    CONF_PASSWORD,
-    CONF_SERVER_CA_CERTIFICATE,
-    CONF_SNAPSHOT_URL,
-    CONF_STREAM_URL,
+    CONF_CONNECTION_MODE,
+    CONNECTION_MODES,
 )
-from .status_helpers import path_value
+from .status_helpers import path_value, strict_bool
 
-TO_REDACT = {
-    CONF_BABY_ID,
-    CONF_BEARER_TOKEN,
-    CONF_BRIDGE_STATUS_URL,
-    CONF_CLIENT_CERTIFICATE,
-    CONF_CLIENT_PRIVATE_KEY,
-    CONF_CRADLE_ID,
-    CONF_DEVICE_ID,
-    CONF_EMAIL,
-    CONF_GROUP_CA_CERTIFICATE,
-    CONF_LOCAL_HOST,
-    CONF_PASSWORD,
-    CONF_SERVER_CA_CERTIFICATE,
-    CONF_SNAPSHOT_URL,
-    CONF_STREAM_URL,
-}
+
+def _number(value: Any) -> int | float | None:
+    """Export only finite operational counters and timestamps."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value if value >= 0 else None
+
+
+def _choice(value: Any, choices: set[str]) -> str | None:
+    return value if isinstance(value, str) and value in choices else None
+
+
+def _version(value: Any) -> str | None:
+    """Do not copy arbitrary device/config text into diagnostic exports."""
+    if isinstance(value, str) and re.fullmatch(r"\d+(?:\.\d+){1,3}", value):
+        return value
+    return None
 
 
 def _provider_diagnostics(data: dict[str, Any] | None) -> dict[str, Any]:
@@ -51,12 +44,15 @@ def _provider_diagnostics(data: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(sources, dict):
         return {}
     diagnostics = {}
-    for source, metadata in sources.items():
+    for source in ("local", "cloud"):
+        metadata = sources.get(source)
         if not isinstance(metadata, dict):
             continue
         diagnostics[source] = {
-            key: metadata.get(key)
-            for key in ("connected", "updated_at", "age_seconds", "stale")
+            "connected": strict_bool(metadata.get("connected")),
+            "updated_at": _number(metadata.get("updated_at")),
+            "age_seconds": _number(metadata.get("age_seconds")),
+            "stale": strict_bool(metadata.get("stale")),
         }
         diagnostics[source]["has_error"] = bool(metadata.get("error"))
     return diagnostics
@@ -72,8 +68,14 @@ async def async_get_config_entry_diagnostics(
     data = coordinator.data if coordinator is not None else None
     config = {**entry.data, **entry.options}
     return {
-        "config_entry": async_redact_data(dict(entry.data), TO_REDACT),
-        "options": async_redact_data(dict(entry.options), TO_REDACT),
+        "config_entry": {
+            CONF_CONNECTION_MODE: _choice(
+                config.get(CONF_CONNECTION_MODE), CONNECTION_MODES
+            ),
+        },
+        "options": {
+            "media_companion_configured": bool(config.get(CONF_BRIDGE_STATUS_URL))
+        },
         "coordinator": {
             "loaded": coordinator is not None,
             "last_update_success": (
@@ -82,30 +84,52 @@ async def async_get_config_entry_diagnostics(
             "command_available": (
                 coordinator.command_available if coordinator is not None else False
             ),
-            "active_provider": path_value(data, ("providers", "active")),
+            "active_provider": _choice(
+                path_value(data, ("providers", "active")), {"local", "cloud"}
+            ),
             "providers": _provider_diagnostics(data),
         },
         "bridge": {
-            "api_version": config.get(CONF_BRIDGE_API_VERSION),
-            "version": config.get(CONF_BRIDGE_VERSION),
-            "healthy": path_value(data, ("bridge", "healthy")),
-            "uptime_seconds": path_value(data, ("bridge", "uptime_seconds")),
-            "reconnect_attempts": path_value(data, ("bridge", "reconnect_attempts")),
-            "mqtt_connected": path_value(data, ("mqtt", "connected")),
-            "webrtc_connection_state": path_value(data, ("webrtc", "connection_state")),
-            "ice_connection_state": path_value(
-                data, ("webrtc", "ice_connection_state")
+            "api_version": _number(config.get(CONF_BRIDGE_API_VERSION)),
+            "version": _version(config.get(CONF_BRIDGE_VERSION)),
+            "healthy": strict_bool(path_value(data, ("bridge", "healthy"))),
+            "uptime_seconds": _number(path_value(data, ("bridge", "uptime_seconds"))),
+            "reconnect_attempts": _number(
+                path_value(data, ("bridge", "reconnect_attempts"))
             ),
-            "video_track": path_value(data, ("media", "video_track")),
-            "audio_track": path_value(data, ("media", "audio_track")),
-            "video_frames": path_value(data, ("media", "video_frames")),
-            "audio_frames": path_value(data, ("media", "audio_frames")),
-            "dropped_video_frames": path_value(data, ("sink", "dropped_video_frames")),
+            "mqtt_connected": strict_bool(path_value(data, ("mqtt", "connected"))),
+            "webrtc_connection_state": _choice(
+                path_value(data, ("webrtc", "connection_state")),
+                {"new", "connecting", "connected", "disconnected", "failed", "closed"},
+            ),
+            "ice_connection_state": _choice(
+                path_value(data, ("webrtc", "ice_connection_state")),
+                {
+                    "new",
+                    "checking",
+                    "connected",
+                    "completed",
+                    "disconnected",
+                    "failed",
+                    "closed",
+                },
+            ),
+            "video_track": strict_bool(path_value(data, ("media", "video_track"))),
+            "audio_track": strict_bool(path_value(data, ("media", "audio_track"))),
+            "video_frames": _number(path_value(data, ("media", "video_frames"))),
+            "audio_frames": _number(path_value(data, ("media", "audio_frames"))),
+            "dropped_video_frames": _number(
+                path_value(data, ("sink", "dropped_video_frames"))
+            ),
         },
         "device_state": {
-            "source": path_value(data, ("device_state", "source")),
-            "updated_at": path_value(data, ("device_state", "updated_at")),
-            "age_seconds": path_value(data, ("device_state", "age_seconds")),
-            "software_version": path_value(data, ("device_state", "software_version")),
+            "source": _choice(
+                path_value(data, ("device_state", "source")), {"local", "cloud"}
+            ),
+            "updated_at": _number(path_value(data, ("device_state", "updated_at"))),
+            "age_seconds": _number(path_value(data, ("device_state", "age_seconds"))),
+            "software_version": _version(
+                path_value(data, ("device_state", "software_version"))
+            ),
         },
     }

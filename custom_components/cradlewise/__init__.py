@@ -62,19 +62,30 @@ async def async_setup_entry(
         if not await async_setup_component(hass, "stream", {}):
             return False
     coordinator = CradlewiseCoordinator(hass, entry)
+    forwarding_started = False
     try:
         await coordinator.async_start()
         await coordinator.async_config_entry_first_refresh()
+        entry.runtime_data = CradlewiseRuntimeData(
+            coordinator=coordinator,
+            platforms=platforms,
+        )
+        entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
+        forwarding_started = True
+        await hass.config_entries.async_forward_entry_setups(entry, platforms)
     except BaseException:
-        await coordinator.async_stop()
+        if forwarding_started:
+            try:
+                await hass.config_entries.async_unload_platforms(entry, platforms)
+            except BaseException:
+                _LOGGER.exception(
+                    "Could not unload platforms after Cradlewise setup failed"
+                )
+        try:
+            await coordinator.async_stop()
+        except BaseException:
+            _LOGGER.exception("Could not stop providers after Cradlewise setup failed")
         raise
-    entry.runtime_data = CradlewiseRuntimeData(
-        coordinator=coordinator,
-        platforms=platforms,
-    )
-    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
-
-    await hass.config_entries.async_forward_entry_setups(entry, platforms)
     return True
 
 

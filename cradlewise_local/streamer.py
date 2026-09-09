@@ -173,11 +173,11 @@ class BridgeStreamer(CribStreamer):
         if topic in state_topics:
             try:
                 payload = json.loads(message.payload)
-            except json.JSONDecodeError:
-                log.warning("Invalid JSON from %s: %s", topic, message.payload[:100])
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                log.warning("Ignored invalid JSON from a local state topic")
                 return
             if not isinstance(payload, dict):
-                log.warning("Ignored non-object JSON from %s", topic)
+                log.warning("Ignored non-object JSON from a local state topic")
                 return
 
             if topic == self.beacon_topic:

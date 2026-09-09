@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ from cradlewise_client.local import (
     LocalCradleClient,
     LocalCredentials,
 )
-from paho.mqtt.client import MQTT_ERR_SUCCESS
+from paho.mqtt.client import MQTT_ERR_SUCCESS, CallbackAPIVersion, Client
 
 
 class FakeMqttClient:
@@ -311,6 +312,183 @@ async def test_callbacks_after_shutdown_begins_do_not_restore_state(client_parts
         connection_states,
     ) == (published_before_shutdown, [], [True])
     await client.async_stop()
+
+
+@pytest.mark.parametrize("phase", ["tls", "connect"])
+async def test_cancelled_start_joins_worker_before_releasing_ownership(
+    client_parts, monkeypatch, phase
+):
+    client, mqtt_client, updates, _connection_states = client_parts
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+    original = mqtt_client.tls_set if phase == "tls" else mqtt_client.connect
+
+    def blocked_operation(*args, **kwargs):
+        entered.set()
+        if not release.wait(5):
+            raise TimeoutError("test connection worker was not released")
+        calls.append(phase)
+        return original(*args, **kwargs)
+
+    def disconnect():
+        calls.append("disconnect")
+
+    monkeypatch.setattr(
+        mqtt_client, "tls_set" if phase == "tls" else "connect", blocked_operation
+    )
+    monkeypatch.setattr(mqtt_client, "disconnect", disconnect)
+    startup = asyncio.create_task(client.async_start())
+    explicit_stop = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        startup.cancel()
+        await asyncio.sleep(0)
+        explicit_stop = asyncio.create_task(client.async_stop())
+        await asyncio.sleep(0)
+        startup.cancel()  # Repeated cancellation must not detach cleanup.
+        await asyncio.sleep(0)
+        assert client.started and not startup.done() and not explicit_stop.done()
+        with pytest.raises(LocalConnectionError, match="already started"):
+            await client.async_start()
+        mqtt_client.on_message(
+            mqtt_client, None, SimpleNamespace(topic=client.beacon_topic, payload=b"{}")
+        )
+    finally:
+        release.set()
+        await asyncio.gather(startup, return_exceptions=True)
+        if explicit_stop is not None:
+            await explicit_stop
+
+    assert (calls, client.started, mqtt_client.loop_started, updates) == (
+        [phase, "disconnect"],
+        False,
+        False,
+        [],
+    )
+    assert startup.cancelled()
+
+
+@pytest.mark.enable_socket
+async def test_repeated_cancelled_connections_close_real_paho_sockets(
+    credentials, monkeypatch
+):
+    """Use real Paho socket ownership, without a broker or crib connection."""
+    baseline_threads = {
+        thread.ident
+        for thread in threading.enumerate()
+        if thread.name.startswith("paho-mqtt-client")
+    }
+    for _ in range(20):
+        entered = threading.Event()
+        release = threading.Event()
+        client_socket, server_socket = socket.socketpair()
+        mqtt_client = Client(
+            callback_api_version=CallbackAPIVersion.VERSION2,
+            client_id="offline-cleanup-test",
+            clean_session=False,
+        )
+
+        def create_socket():
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("test socket worker was not released")
+            return client_socket
+
+        monkeypatch.setattr(mqtt_client, "_create_socket", create_socket)
+        client = LocalCradleClient(
+            host="192.0.2.10",
+            cradle_id="offline-cleanup-test",
+            credentials=credentials,
+            update_callback=lambda _: None,
+            connection_callback=lambda _: None,
+            mqtt_client_factory=lambda **_: mqtt_client,
+        )
+        monkeypatch.setattr(client, "_configure_tls", lambda _: None)
+        startup = asyncio.create_task(client.async_start())
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            startup.cancel()
+            await asyncio.sleep(0)
+            assert client.started and not startup.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await startup
+            assert not client.started and mqtt_client.socket() is None
+            assert client_socket.fileno() == -1
+        finally:
+            release.set()
+            await asyncio.gather(startup, return_exceptions=True)
+            await client.async_stop()
+            client_socket.close()
+            server_socket.close()
+
+    assert {
+        thread.ident
+        for thread in threading.enumerate()
+        if thread.name.startswith("paho-mqtt-client")
+    } == baseline_threads
+
+
+async def test_concurrent_stops_share_disconnect_and_join_loop(
+    client_parts, monkeypatch
+):
+    client, mqtt_client, _updates, _connection_states = client_parts
+    await client.async_start()
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def disconnect():
+        calls.append("disconnect")
+        entered.set()
+        if not release.wait(5):
+            raise TimeoutError("test disconnect was not released")
+
+    monkeypatch.setattr(mqtt_client, "disconnect", disconnect)
+    first = asyncio.create_task(client.async_stop())
+    second = asyncio.create_task(client.async_stop())
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        first.cancel()
+        await asyncio.sleep(0)
+        assert client.started and not first.done() and not second.done()
+    finally:
+        release.set()
+        await asyncio.gather(first, second, return_exceptions=True)
+
+    assert (calls, mqtt_client.loop_stopped, client.started) == (
+        ["disconnect"],
+        True,
+        False,
+    )
+    assert first.cancelled() and second.exception() is None
+
+
+async def test_callbacks_from_previous_client_cannot_change_replacement(
+    client_parts, monkeypatch
+):
+    client, old_mqtt, updates, connection_states = client_parts
+    await client.async_start()
+    await client.async_stop()
+    new_mqtt = FakeMqttClient()
+    monkeypatch.setattr(client, "_mqtt_client_factory", lambda **_: new_mqtt)
+    await client.async_start()
+    try:
+        old_mqtt.on_connect(old_mqtt, None, {}, 0, None)
+        old_mqtt.on_subscribe(old_mqtt, None, 7, [128] * 6, None)
+        old_mqtt.on_disconnect(old_mqtt, None, {}, 1, None)
+        old_mqtt.on_message(
+            old_mqtt, None, SimpleNamespace(topic=client.beacon_topic, payload=b"{}")
+        )
+        await asyncio.sleep(0)
+        assert (client.connected, connection_states, updates) == (
+            True,
+            [True, False, True],
+            [],
+        )
+    finally:
+        await client.async_stop()
 
 
 def test_credentials_prefer_pinned_server_ca(tmp_path: Path):

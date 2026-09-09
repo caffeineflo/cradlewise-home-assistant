@@ -760,7 +760,7 @@ class CribStreamer:
             try:
                 msg = json.loads(raw)
             except (json.JSONDecodeError, UnicodeDecodeError):
-                log.warning("Invalid JSON from MQTT: %s", raw[:100])
+                log.warning("Ignored invalid JSON from MQTT signaling")
                 continue
             if not isinstance(msg, dict):
                 log.warning("Ignored non-object MQTT signaling payload")

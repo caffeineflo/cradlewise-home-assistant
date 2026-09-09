@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -25,9 +27,10 @@ except ModuleNotFoundError:
 from cradlewise_client.certificates import BrokerCertificateError
 from cradlewise_client.cloud import CradleAccount, ProvisionedCredentials, UserDevice
 
-from custom_components.cradlewise import BASE_PLATFORMS
+from custom_components.cradlewise import BASE_PLATFORMS, async_setup_entry
 from custom_components.cradlewise.camera import CradlewiseBridgeCamera
 from custom_components.cradlewise.config_flow import (
+    CradlewiseConfigFlow,
     CradlewiseOptionsFlow,
     RegistrationNotFoundError,
 )
@@ -1286,7 +1289,7 @@ async def test_diagnostics_redact_all_credentials(
     assert "parent@example.com" not in serialized
     assert "client private key" not in serialized
     assert "192.0.2.10" not in serialized
-    assert diagnostics["config_entry"][CONF_BABY_ID] != 42
+    assert CONF_BABY_ID not in diagnostics["config_entry"]
     assert diagnostics["coordinator"]["active_provider"] == "local"
     assert "error" not in diagnostics["coordinator"]["providers"]["local"]
 
@@ -1335,3 +1338,224 @@ async def test_unload_stops_provider_clients(
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert stop.await_count == 1
+
+
+async def test_diagnostics_export_only_operational_configuration(hass):
+    sensitive = "PRIVATE_CHILD_CRIB_AND_ACCOUNT_SENTINEL"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=sensitive,
+        unique_id=sensitive,
+        data={
+            **dict.fromkeys(_base_entry_data(), sensitive),
+            CONF_CONNECTION_MODE: CONNECTION_MODE_AUTOMATIC,
+            "future_profile_field": {"child": sensitive},
+        },
+        options={CONF_BRIDGE_STATUS_URL: sensitive, "future_option": sensitive},
+    )
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["config_entry"] == {
+        CONF_CONNECTION_MODE: CONNECTION_MODE_AUTOMATIC
+    }
+    assert sensitive not in str(diagnostics)
+
+
+async def test_diagnostics_do_not_copy_unexpected_text_or_provider_keys(hass):
+    sensitive = "PRIVATE_CHILD_CRIB_SENTINEL"
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_BRIDGE_VERSION: sensitive})
+    metadata = dict.fromkeys(
+        ("connected", "updated_at", "age_seconds", "stale", "error"), sensitive
+    )
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            last_update_success=True,
+            command_available=False,
+            data={
+                "providers": {
+                    "active": sensitive,
+                    "sources": {sensitive: metadata, "local": metadata},
+                },
+                "bridge": dict.fromkeys(
+                    ("healthy", "uptime_seconds", "reconnect_attempts"), sensitive
+                ),
+                "device_state": dict.fromkeys(
+                    ("source", "updated_at", "age_seconds", "software_version"),
+                    sensitive,
+                ),
+                "webrtc": {
+                    "connection_state": sensitive,
+                    "ice_connection_state": sensitive,
+                },
+            },
+        )
+    )
+
+    assert sensitive not in str(await async_get_config_entry_diagnostics(hass, entry))
+
+
+@pytest.mark.parametrize(
+    "origin,expected_token",
+    [
+        ("https://old-bridge.example/state", TOKEN),
+        ("https://old-bridge.example:443/info", TOKEN),
+        ("https://new-bridge.example", ""),
+        ("https://old-bridge.example:8443", ""),
+        ("http://old-bridge.example", ""),
+    ],
+)
+async def test_media_options_reuse_a_blank_token_only_on_the_same_origin(
+    hass, monkeypatch, origin, expected_token
+):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_CRADLE_ID: CRADLE_ID},
+        options={
+            CONF_BRIDGE_STATUS_URL: "https://old-bridge.example",
+            CONF_BEARER_TOKEN: TOKEN,
+        },
+    )
+    flow = CradlewiseOptionsFlow(entry)
+    flow.hass = hass
+    fetch = AsyncMock(return_value=(None, "cannot_connect"))
+    monkeypatch.setattr(flow, "_async_media_data", fetch)
+    monkeypatch.setattr(
+        "custom_components.cradlewise.config_flow.http_url_resolves_to_private_network",
+        lambda url: True,
+    )
+
+    await flow.async_step_media(
+        {CONF_BRIDGE_STATUS_URL: origin, CONF_ALLOW_INSECURE_HTTP: True}
+    )
+
+    assert fetch.await_args.args[1] == expected_token
+
+
+async def test_media_options_use_an_explicit_token_for_a_new_origin(hass, monkeypatch):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_CRADLE_ID: CRADLE_ID},
+        options={
+            CONF_BRIDGE_STATUS_URL: "https://old-bridge.example",
+            CONF_BEARER_TOKEN: TOKEN,
+        },
+    )
+    flow = CradlewiseOptionsFlow(entry)
+    flow.hass = hass
+    fetch = AsyncMock(return_value=(None, "cannot_connect"))
+    monkeypatch.setattr(flow, "_async_media_data", fetch)
+
+    await flow.async_step_media(
+        {
+            CONF_BRIDGE_STATUS_URL: "https://new-bridge.example",
+            CONF_BEARER_TOKEN: "new-token",
+        }
+    )
+
+    assert fetch.await_args.args[1] == "new-token"
+
+
+@pytest.mark.parametrize(
+    "step", ["account_automatic", "account_local", "account_cloud"]
+)
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        {CONF_EMAIL: "   ", CONF_PASSWORD: "test"},
+        {CONF_EMAIL: "parent@example.com", CONF_PASSWORD: ""},
+    ],
+)
+async def test_account_flow_validates_blank_credentials(hass, step, credentials):
+    flow = CradlewiseConfigFlow()
+    flow.hass = hass
+
+    result = await getattr(flow, f"async_step_{step}")(credentials)
+
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_existing_account_validation_handles_blank_credentials(hass):
+    flow = CradlewiseConfigFlow()
+    flow.hass = hass
+
+    assert await flow._async_validate_existing_account(" ", "test", CRADLE_ID) == (
+        None,
+        "invalid_auth",
+    )
+
+
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("forwarding failed"), asyncio.CancelledError()]
+)
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+async def test_failed_platform_setup_always_stops_providers_and_preserves_cause(
+    hass, monkeypatch, failure, cleanup_fails
+):
+    entry = MockConfigEntry(domain=DOMAIN, data=_base_entry_data(), version=1)
+    entry.add_to_hass(hass)
+    stop = AsyncMock(side_effect=RuntimeError("stop failed") if cleanup_fails else None)
+    unload = AsyncMock(
+        side_effect=RuntimeError("unload failed") if cleanup_fails else None
+    )
+    monkeypatch.setattr(CradlewiseCoordinator, "async_start", AsyncMock())
+    monkeypatch.setattr(
+        CradlewiseCoordinator, "async_config_entry_first_refresh", AsyncMock()
+    )
+    monkeypatch.setattr(CradlewiseCoordinator, "async_stop", stop)
+    monkeypatch.setattr(
+        hass.config_entries,
+        "async_forward_entry_setups",
+        AsyncMock(side_effect=failure),
+    )
+    monkeypatch.setattr(hass.config_entries, "async_unload_platforms", unload)
+
+    with pytest.raises(type(failure)) as raised:
+        await async_setup_entry(hass, entry)
+
+    assert raised.value is failure
+    assert stop.await_count == unload.await_count == 1
+
+
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("forwarding failed"), asyncio.CancelledError()]
+)
+@pytest.mark.parametrize("provider_stop_fails", [False, True])
+async def test_failed_platform_setup_removes_real_runtime_credentials(
+    hass, monkeypatch, failure, provider_stop_fails
+):
+    entry = MockConfigEntry(domain=DOMAIN, data=_base_entry_data(), version=1)
+    entry.add_to_hass(hass)
+    provider = SimpleNamespace(
+        async_start=AsyncMock(),
+        async_stop=AsyncMock(
+            side_effect=RuntimeError("disconnect failed")
+            if provider_stop_fails
+            else None
+        ),
+    )
+    credential_files = []
+
+    def create_client(self, host, credentials):
+        credential_files.append(credentials.client_key_path)
+        assert credentials.client_key_path.is_file()
+        return provider
+
+    monkeypatch.setattr(CradlewiseCoordinator, "_create_local_client", create_client)
+    monkeypatch.setattr(
+        CradlewiseCoordinator, "async_config_entry_first_refresh", AsyncMock()
+    )
+    monkeypatch.setattr(
+        hass.config_entries,
+        "async_forward_entry_setups",
+        AsyncMock(side_effect=failure),
+    )
+    monkeypatch.setattr(
+        hass.config_entries, "async_unload_platforms", AsyncMock(return_value=True)
+    )
+
+    with pytest.raises(type(failure)) as raised:
+        await async_setup_entry(hass, entry)
+
+    assert raised.value is failure
+    assert provider.async_start.await_count == provider.async_stop.await_count == 1
+    assert len(credential_files) == 1 and not credential_files[0].parent.exists()

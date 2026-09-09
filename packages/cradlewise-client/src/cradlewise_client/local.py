@@ -119,6 +119,7 @@ class LocalCradleClient:
         self._connected = False
         self._stopping = False
         self._stop_task: asyncio.Task[None] | None = None
+        self._connect_task: asyncio.Task[int] | None = None
         self._mqtt_loop_started = False
         self._publish_lock = threading.Lock()
         self._state_subscription_mids: set[int] = set()
@@ -144,7 +145,7 @@ class LocalCradleClient:
 
     async def async_start(self, timeout: float = 10) -> None:
         """Connect and wait until the state subscription is ready."""
-        if self._mqtt is not None:
+        if self._mqtt is not None or self._stop_task is not None:
             raise LocalConnectionError("local MQTT client is already started")
 
         self._loop = asyncio.get_running_loop()
@@ -156,7 +157,6 @@ class LocalCradleClient:
             clean_session=False,
             protocol=mqtt.MQTTv311,
         )
-        await asyncio.to_thread(self._configure_tls, client)
         client.reconnect_delay_set(min_delay=1, max_delay=30)
         client.on_connect = self._on_connect
         client.on_disconnect = self._on_disconnect
@@ -165,12 +165,13 @@ class LocalCradleClient:
         self._mqtt = client
 
         try:
-            result = await asyncio.to_thread(
-                client.connect,
-                self.host,
-                MQTT_PORT,
-                15,
+            self._connect_task = asyncio.create_task(
+                asyncio.to_thread(self._connect, client),
+                name="cradlewise-mqtt-connect",
             )
+            result = await asyncio.shield(self._connect_task)
+            if self._stopping or self._mqtt is not client:
+                raise LocalConnectionError("local MQTT was stopped during startup")
             if result != MQTT_ERR_SUCCESS:
                 raise LocalConnectionError(
                     f"local MQTT connect failed before CONNACK with rc={result}"
@@ -179,8 +180,21 @@ class LocalCradleClient:
             self._mqtt_loop_started = True
             await asyncio.wait_for(self._connected_future, timeout=timeout)
         except BaseException:
-            await self.async_stop()
+            try:
+                await self.async_stop()
+            except BaseException as cleanup_error:
+                if not isinstance(cleanup_error, asyncio.CancelledError):
+                    _LOGGER.exception(
+                        "Local Cradlewise MQTT cleanup failed after startup failed"
+                    )
             raise
+
+    def _connect(self, client: mqtt.Client) -> int:
+        """Keep TLS setup and socket creation in one owned worker."""
+        self._configure_tls(client)
+        if self._stopping:
+            raise LocalConnectionError("local MQTT was stopped before connecting")
+        return client.connect(self.host, MQTT_PORT, 15)
 
     def _configure_tls(self, client: mqtt.Client) -> None:
         """Configure local broker TLS with a validated server CA."""
@@ -197,20 +211,56 @@ class LocalCradleClient:
 
     async def async_stop(self) -> None:
         """Disconnect and stop the Paho network thread."""
-        current_task = asyncio.current_task()
-        stop_task = self._stop_task
-        if stop_task is not None and stop_task is not current_task:
-            await asyncio.shield(stop_task)
+        if self._mqtt is None and self._stop_task is None:
             return
+        task = self._ensure_stop_task()
+        cancelled: asyncio.CancelledError | None = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as error:
+                # A canceled caller must still join the worker before teardown
+                # is reported complete or a replacement client can be started.
+                cancelled = error
+            except Exception:
+                break  # Retrieve and propagate the cleanup error below.
+        try:
+            task.result()
+        except BaseException:
+            if cancelled is None:
+                raise
+            _LOGGER.exception(
+                "Local Cradlewise MQTT cleanup failed during cancellation"
+            )
+        if cancelled is not None:
+            raise cancelled
 
+    def _ensure_stop_task(self) -> asyncio.Task[None]:
+        if self._stop_task is None:
+            self._stopping = True
+            self._stop_task = asyncio.create_task(
+                self._async_stop(), name="cradlewise-mqtt-stop"
+            )
+            self._stop_task.add_done_callback(self._handle_stop_task_done)
+        return self._stop_task
+
+    async def _async_stop(self) -> None:
+        """Join pending connection work before disconnecting its final socket."""
         client = self._mqtt
         if client is None:
             return
 
-        self._stopping = True
-        self._mqtt = None
         cleanup_errors: list[BaseException] = []
         try:
+            if self._connect_task is not None:
+                result = await asyncio.gather(
+                    self._connect_task, return_exceptions=True
+                )
+                if isinstance(result[0], BaseException):
+                    _LOGGER.debug(
+                        "Cradlewise connection attempt failed before cleanup: %s",
+                        result[0],
+                    )
             try:
                 await asyncio.to_thread(client.disconnect)
             except BaseException as error:
@@ -221,6 +271,8 @@ class LocalCradleClient:
                 except BaseException as error:
                     cleanup_errors.append(error)
         finally:
+            self._mqtt = None
+            self._connect_task = None
             self._mqtt_loop_started = False
             self._set_connected(False)
             if self._connected_future is not None:
@@ -239,7 +291,7 @@ class LocalCradleClient:
     def publish_shadow(self, payload: dict[str, Any]) -> None:
         """Publish an APK-shaped desired shadow update without retrying it."""
         client = self._mqtt
-        if client is None or not self._connected:
+        if client is None or not self._connected or self._stopping:
             raise LocalConnectionError("local MQTT publisher is not connected")
         data = json.dumps(payload, separators=(",", ":"))
         with self._publish_lock:
@@ -255,7 +307,7 @@ class LocalCradleClient:
             )
 
     def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
-        if self._stopping:
+        if self._stopping or client is not self._mqtt:
             return
         if reason_code != 0:
             self._dispatch_connection_error(
@@ -290,6 +342,8 @@ class LocalCradleClient:
         reason_code,
         properties,
     ) -> None:
+        if self._stopping or client is not self._mqtt:
+            return
         self._dispatch_disconnected()
         if reason_code != 0 and not self._stopping:
             _LOGGER.warning("Local Cradlewise MQTT disconnected: %s", reason_code)
@@ -302,7 +356,7 @@ class LocalCradleClient:
         reason_code_list,
         properties,
     ) -> None:
-        if self._stopping:
+        if self._stopping or client is not self._mqtt:
             return
         if mid not in self._state_subscription_mids:
             return
@@ -323,7 +377,7 @@ class LocalCradleClient:
         self._dispatch_connected()
 
     def _on_message(self, client, userdata, message) -> None:
-        if self._stopping:
+        if self._stopping or client is not self._mqtt:
             return
         topic = message.topic
         kinds = {
@@ -343,14 +397,10 @@ class LocalCradleClient:
         try:
             payload = json.loads(message.payload)
         except (json.JSONDecodeError, UnicodeDecodeError):
-            _LOGGER.warning(
-                "Ignored invalid JSON from local Cradlewise topic %s", topic
-            )
+            _LOGGER.warning("Ignored invalid JSON from local Cradlewise state")
             return
         if not isinstance(payload, dict):
-            _LOGGER.warning(
-                "Ignored non-object state from local Cradlewise topic %s", topic
-            )
+            _LOGGER.warning("Ignored non-object state from local Cradlewise")
             return
         self._dispatch_update(LocalCradleUpdate(kind=kind, payload=payload))
 
@@ -375,23 +425,21 @@ class LocalCradleClient:
             loop.call_soon_threadsafe(self._update_callback, update)
 
     def _handle_connected(self) -> None:
+        if self._stopping:
+            return
         self._set_connected(True)
         if self._connected_future is not None and not self._connected_future.done():
             self._connected_future.set_result(None)
 
     def _handle_connection_error(self, error: LocalConnectionError) -> None:
+        if self._stopping:
+            return
         self._set_connected(False)
         if self._connected_future is not None and not self._connected_future.done():
             self._connected_future.set_exception(error)
             return
         _LOGGER.error("Local Cradlewise MQTT error: %s", error)
-        if self._stop_task is None or self._stop_task.done():
-            task = asyncio.create_task(
-                self.async_stop(),
-                name=f"cradlewise-local-stop-{self.cradle_id}",
-            )
-            self._stop_task = task
-            task.add_done_callback(self._handle_stop_task_done)
+        self._ensure_stop_task()
 
     def _handle_stop_task_done(self, task: asyncio.Task[None]) -> None:
         """Observe background shutdown completion and report failures."""

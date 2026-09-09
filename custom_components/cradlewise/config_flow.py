@@ -35,6 +35,7 @@ from .config_helpers import (
     info_url_from_status_url,
     is_http_url,
     is_rtsp_url,
+    same_url_origin,
     snapshot_url_from_status_url,
 )
 from .const import (
@@ -265,11 +266,11 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._email = str(user_input.get(CONF_EMAIL, "")).strip()
             self._password = str(user_input.get(CONF_PASSWORD, ""))
-            cloud = CloudAccountClient(
-                email=self._email,
-                password=self._password,
-            )
             try:
+                cloud = CloudAccountClient(
+                    email=self._email,
+                    password=self._password,
+                )
                 accounts = await self.hass.async_add_executor_job(
                     self._authenticate_and_list,
                     cloud,
@@ -467,8 +468,8 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         password: str,
         cradle_id: str,
     ) -> tuple[CloudAccountClient | None, str | None]:
-        cloud = CloudAccountClient(email=email, password=password)
         try:
+            cloud = CloudAccountClient(email=email, password=password)
             accounts = await self.hass.async_add_executor_job(
                 self._authenticate_and_list,
                 cloud,
@@ -681,7 +682,9 @@ class CradlewiseOptionsFlow(OptionsFlow):
                             errors["base"] = "insecure_http_requires_confirmation"
                 if not errors:
                     token = str(user_input.get(CONF_BEARER_TOKEN, "")).strip()
-                    if not token:
+                    if not token and same_url_origin(
+                        bridge_url, str(current.get(CONF_BRIDGE_STATUS_URL, ""))
+                    ):
                         token = str(current.get(CONF_BEARER_TOKEN, ""))
                     data, error = await self._async_media_data(bridge_url, token)
                     if error is not None:
