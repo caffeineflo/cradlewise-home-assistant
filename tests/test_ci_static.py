@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+import yaml
+
 
 def test_dockerfile_installs_from_uv_lock():
     dockerfile = Path("Dockerfile").read_text()
@@ -57,28 +59,25 @@ def test_bridge_image_includes_inactive_observability_extra():
 
 
 def test_ci_builds_bridge_image_without_publishing():
-    workflow = Path(".github/workflows/tests.yml").read_text()
+    workflow = Path(".github/workflows/bridge-image.yml").read_text()
 
     assert "docker/build-push-action@" in workflow and "push: false" in workflow
 
 
 def test_ci_and_release_build_bridge_for_amd64_and_arm64():
-    workflows = {
-        "ci": Path(".github/workflows/tests.yml")
-        .read_text()
-        .split("  bridge-image-check:", 1)[1],
-        "release": Path(".github/workflows/release.yml")
-        .read_text()
-        .split("  bridge-image-publish:", 1)[1]
-        .split("  github-release:", 1)[0],
-    }
-
-    assert all(
-        "docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a" in workflow
-        and "with:\n          platforms: arm64" in workflow
-        and "platforms: linux/amd64,linux/arm64" in workflow
-        for workflow in workflows.values()
+    image_workflow = yaml.safe_load(
+        Path(".github/workflows/bridge-image.yml").read_text()
     )
+    matrix = image_workflow["jobs"]["image"]["strategy"]["matrix"]["include"]
+    assert matrix == [
+        {"arch": "amd64", "runner": "ubuntu-24.04"},
+        {"arch": "arm64", "runner": "ubuntu-24.04-arm"},
+    ]
+    for filename in ("tests.yml", "release.yml"):
+        workflow = yaml.safe_load(Path(f".github/workflows/{filename}").read_text())
+        assert workflow["jobs"]["bridge-image-build"]["uses"] == (
+            "./.github/workflows/bridge-image.yml"
+        )
 
 
 def test_ci_actions_are_pinned_to_full_commit_shas():
@@ -125,9 +124,73 @@ def test_dependabot_python_updates_are_not_suppressed_by_ha_test_pins():
 
 
 def test_ci_jobs_have_explicit_timeouts():
-    workflow = Path(".github/workflows/tests.yml").read_text()
+    for filename in ("tests.yml", "bridge-image.yml", "image-security.yml"):
+        workflow = yaml.safe_load(Path(f".github/workflows/{filename}").read_text())
+        assert all(
+            "timeout-minutes" in job or "uses" in job
+            for job in workflow["jobs"].values()
+        )
 
-    assert workflow.count("    timeout-minutes:") == 7
+
+def test_final_runtime_excludes_build_tools_and_is_smoke_tested_offline():
+    smoke = Path("tests/bridge_image_smoke.py").read_text()
+    dockerfile = Path("Dockerfile").read_text()
+    runtime = dockerfile.split("FROM runtime-base AS runtime", 1)[1]
+    workflow = Path(".github/workflows/bridge-image.yml").read_text()
+
+    assert "pip uninstall --yes pip" in dockerfile
+    assert "COPY --from=build --chown=10001:10001 /app /app" in runtime
+    assert "/uv" not in runtime
+    assert all(
+        option in workflow
+        for option in (
+            "--network none",
+            "--read-only",
+            "--cap-drop ALL",
+            "--pids-limit 256",
+            "--entrypoint ffmpeg",
+        )
+    )
+    assert "tests/bridge_image_smoke.py" in workflow
+    assert "no-cache-filters: runtime-base" in workflow
+    assert "getFingerprints()" in smoke and "os.getuid() == 10001" in smoke
+
+
+def test_full_image_reports_keep_unfixed_findings_but_gate_fixable_highs():
+    for filename in ("bridge-image.yml", "image-security.yml"):
+        workflow = yaml.safe_load(Path(f".github/workflows/{filename}").read_text())
+        job = next(iter(workflow["jobs"].values()))
+        scans = [
+            step["run"] for step in job["steps"] if "trivy image" in step.get("run", "")
+        ]
+        report = next(scan for scan in scans if "--format json" in scan)
+        gate = next(scan for scan in scans if "--exit-code 1" in scan)
+        assert "--ignore-unfixed" not in report and "--severity" not in report
+        assert "--ignore-unfixed" in gate and "--severity HIGH,CRITICAL" in gate
+        assert "--ignorefile" not in report + gate
+
+
+def test_releases_validate_versions_and_all_artifacts_before_either_publish():
+    workflow = yaml.safe_load(Path(".github/workflows/release.yml").read_text())
+    jobs = workflow["jobs"]
+    for job_name in ("client-package-build", "bridge-image-build"):
+        assert "release-versions" in jobs[job_name]["needs"]
+    for job_name in ("client-package-publish", "bridge-image-publish"):
+        assert {"client-package-build", "bridge-image-build"} <= set(
+            jobs[job_name]["needs"]
+        )
+    publish = str(jobs["bridge-image-publish"])
+    assert "docker load --input" in publish and "imagetools create" in publish
+    assert "docker/build-push-action" not in publish
+
+
+def test_required_bridge_check_fails_when_image_jobs_fail_or_are_skipped():
+    workflow = yaml.safe_load(Path(".github/workflows/tests.yml").read_text())
+    gate = workflow["jobs"]["bridge-image-check"]
+
+    assert gate["needs"] == "bridge-image-build"
+    assert gate["if"] == "always()"
+    assert gate["steps"][0]["run"] == 'test "$IMAGE_RESULT" = success'
 
 
 def test_ci_blocks_new_high_severity_dependency_vulnerabilities():
@@ -153,7 +216,7 @@ def test_release_package_write_permission_is_bridge_publish_only():
     assert (
         "packages: write" in publish_job
         and "ghcr.io/caffeineflo/cradlewise-local-bridge" in workflow
-        and "push: true" in publish_job
+        and 'docker push "$ref"' in publish_job
     )
 
 
@@ -182,6 +245,7 @@ def test_client_release_build_requires_all_unprivileged_gates():
     assert (
         required_jobs
         == {
+            "release-versions",
             "dependabot-audit",
             "test",
             "lint",
@@ -254,7 +318,7 @@ def test_ci_and_release_test_supported_and_current_home_assistant():
     )
 
     assert workflows.count('home-assistant-version: "2026.8.0"') == 2
-    assert workflows.count('home-assistant-version: "2026.9.0"') == 2
+    assert workflows.count('home-assistant-version: "2026.9.1"') == 2
     assert workflows.count("Verify state-only imports without media dependencies") == 2
     assert workflows.count("needs: home-assistant-versions") == 2
 

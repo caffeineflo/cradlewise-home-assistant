@@ -1,2 +1,7 @@
 # Cradlewise integration, client, bridge, tests, and project files.
 * @fharr
+
+# Shared release security checks and supporting documentation.
+.github/workflows/* @fharr
+docs/process/* @fharr
+tests/* @fharr
