@@ -7,6 +7,21 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-09-09
+
+### Fixed
+
+- Keep the Connectivity sensor available and reporting disconnected during
+  coordinator failures, without making stale crib readings available.
+- Exclude raw bridge response bodies and transport exception text from command
+  errors, including their displayed tracebacks.
+
+### Changed
+
+- Support Home Assistant 2026.6.0 and newer. The minimum now follows the
+  certificate repair API requirement; CI tests it alongside 2026.9.1.
+- Refresh the pending HACS submission's release links as part of each release.
+
 ## [0.2.7] - 2026-09-09
 
 ### Fixed
