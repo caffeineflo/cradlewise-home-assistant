@@ -142,10 +142,28 @@ jobs:
           set -euo pipefail
           uv pip install --python .ha-test/bin/python \
             "pytest-homeassistant-custom-component==${{ matrix.ha-test-version }}" \
-            "PyTurboJPEG==2.5.0" \
-            "av==17.0.1" \
-            "ha-ffmpeg==3.2.2" \
             --editable ./packages/cradlewise-client
+
+      - name: Install the tested Home Assistant media requirements
+        run: |
+          .ha-test/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          import homeassistant
+
+          components = Path(homeassistant.__file__).parent / "components"
+          requirements = []
+          for domain in ("stream", "ffmpeg"):
+              manifest = json.loads((components / domain / "manifest.json").read_text())
+              requirements.extend(manifest["requirements"])
+          subprocess.run(
+              ["uv", "pip", "install", "--python", sys.executable, *requirements],
+              check=True,
+          )
+          PY
 
       - name: Verify Home Assistant version
         run: |
