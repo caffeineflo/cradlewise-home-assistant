@@ -123,7 +123,9 @@ class CradlewiseStatusBinarySensor(CradlewiseCoordinatorEntity, BinarySensorEnti
 
     @property
     def available(self) -> bool:
-        """Require current provider data and a valid boolean value."""
+        """Keep connectivity observable while normal sensors require fresh data."""
+        if self.entity_description.device_class is BinarySensorDeviceClass.CONNECTIVITY:
+            return True
         return (
             super().available
             and (
@@ -135,5 +137,10 @@ class CradlewiseStatusBinarySensor(CradlewiseCoordinatorEntity, BinarySensorEnti
 
     @property
     def is_on(self) -> bool | None:
+        if (
+            self.entity_description.device_class is BinarySensorDeviceClass.CONNECTIVITY
+            and not self.coordinator.last_update_success
+        ):
+            return False
         value: Any = path_value(self.coordinator.data, self.entity_description.path)
         return strict_bool(value)

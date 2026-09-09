@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import traceback
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
@@ -9,9 +10,11 @@ import pytest
 from cradlewise_client.cloud import CloudAuthenticationError
 
 try:
+    import aiohttp
     from homeassistant import config_entries
     from homeassistant.const import CONF_EMAIL, CONF_NAME, CONF_PASSWORD
     from homeassistant.core import HomeAssistant
+    from homeassistant.exceptions import HomeAssistantError
     from homeassistant.helpers.update_coordinator import UpdateFailed
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 except ModuleNotFoundError:
@@ -159,6 +162,59 @@ async def test_media_companion_is_the_only_local_command_publisher(
         "command": "actuator_on",
         "value": True,
     }
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 500, 502, 503])
+async def test_bridge_command_errors_do_not_expose_response_bodies(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    status: int,
+) -> None:
+    coordinator = CradlewiseCoordinator(
+        hass, _entry(**{CONF_BRIDGE_STATUS_URL: BRIDGE_URL})
+    )
+    coordinator._bridge_command_available = True
+    aioclient_mock.post(
+        f"{BRIDGE_URL}/command",
+        status=status,
+        text="synthetic-private-response-marker",
+    )
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await coordinator.async_send_command("actuator_on", False)
+
+    expected = (
+        "Media companion authentication failed"
+        if status == 401
+        else f"Media companion command failed with HTTP {status}"
+    )
+    assert str(raised.value) == expected
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        aiohttp.ClientConnectionError("synthetic-private-transport-marker"),
+        TimeoutError("synthetic-private-transport-marker"),
+    ],
+)
+async def test_bridge_command_transport_errors_do_not_expose_exception_text(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    error: Exception,
+) -> None:
+    coordinator = CradlewiseCoordinator(
+        hass, _entry(**{CONF_BRIDGE_STATUS_URL: BRIDGE_URL})
+    )
+    coordinator._bridge_command_available = True
+    aioclient_mock.post(f"{BRIDGE_URL}/command", exc=error)
+
+    with pytest.raises(HomeAssistantError, match="Media companion command") as raised:
+        await coordinator.async_send_command("actuator_on", False)
+
+    assert "synthetic-private-transport-marker" not in "".join(
+        traceback.format_exception(raised.value)
+    )
 
 
 async def test_cloud_only_reads_only_media_health(

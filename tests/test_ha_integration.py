@@ -1240,6 +1240,47 @@ async def test_setup_without_media_creates_no_camera(
     assert Platform.CAMERA not in entry.runtime_data.platforms
 
 
+async def test_connectivity_reports_off_during_failure_and_on_after_recovery(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+) -> None:
+    aioclient_mock.get(STATE_URL, json=_bridge_payload())
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Nursery Crib",
+        unique_id=CRADLE_ID,
+        data=_bridge_entry_data(),
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    connectivity = registry.async_get_entity_id(
+        "binary_sensor", DOMAIN, f"{CRADLE_ID}_bridge_healthy"
+    )
+    occupancy = registry.async_get_entity_id(
+        "binary_sensor", DOMAIN, f"{CRADLE_ID}_baby_present"
+    )
+    coordinator = entry.runtime_data.coordinator
+    assert hass.states.get(connectivity).state == "on"
+
+    coordinator.async_set_update_error(ConnectionError("companion disconnected"))
+    await hass.async_block_till_done()
+    assert (
+        hass.states.get(connectivity).state,
+        hass.states.get(occupancy).state,
+    ) == ("off", "unavailable")
+
+    coordinator.async_set_updated_data(coordinator.data)
+    await hass.async_block_till_done()
+    assert (
+        hass.states.get(connectivity).state,
+        hass.states.get(occupancy).state,
+    ) == ("on", "off")
+
+
 async def test_camera_quotes_rtsp_url_for_ffmpeg(
     hass: HomeAssistant,
 ) -> None:

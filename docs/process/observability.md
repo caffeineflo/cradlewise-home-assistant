@@ -80,6 +80,12 @@ With no DSN, no error-reporting connection is attempted.
 
 ## Home Assistant diagnostics
 
+The Connectivity binary sensor stays available and reports disconnected when
+the coordinator fails, so automations watching for `off` can still run. Other
+crib sensors become unavailable until their data is usable again. Command
+errors include the HTTP status or transport error class, but don't copy raw
+response bodies, private URLs, or transport exception text into the error.
+
 Home Assistant diagnostics are generated only when a user manually downloads
 them. The integration exports an explicit allowlist: connection mode, whether
 media is configured, numeric versions, provider health, reconnect and frame
