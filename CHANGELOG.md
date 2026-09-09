@@ -7,6 +7,31 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-09-09
+
+### Fixed
+
+- Limit Home Assistant diagnostics to operational fields so account names,
+  child names, device identifiers, and future private config fields stay out.
+- Reuse a saved media bearer token only when the endpoint's origin is unchanged.
+- Join pending MQTT connection work before finishing cancellation or shutdown,
+  and share cleanup between concurrent stop calls.
+- Stop providers and unload partial platforms when Home Assistant setup fails.
+- Reject malformed MQTT encodings without terminating the callback or logging
+  nursery payloads, and fall back when cloud IP-discovery JSON is malformed.
+- Return an authentication error in the setup flow for blank credentials.
+
+### Changed
+
+- Remove pip, uv, and uvx from the final bridge runtime image and update the
+  isolated build-stage uv tool.
+- Build and smoke-test each final image on its native architecture; retain full
+  vulnerability reports and block fixable high/critical findings.
+- Scan the latest published image weekly for both supported architectures.
+- Require version parity and all artifact checks before either release publish;
+  publish the tested images without rebuilding them.
+- Test the integration against Home Assistant 2026.8.0 and 2026.9.1.
+
 ## [0.2.6] - 2026-09-06
 
 ### Fixed
