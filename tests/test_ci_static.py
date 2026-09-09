@@ -317,7 +317,7 @@ def test_ci_and_release_test_supported_and_current_home_assistant():
         )
     )
 
-    assert workflows.count('home-assistant-version: "2026.8.0"') == 2
+    assert workflows.count('home-assistant-version: "2026.6.0"') == 2
     assert workflows.count('home-assistant-version: "2026.9.1"') == 2
     assert workflows.count("Verify state-only imports without media dependencies") == 2
     assert workflows.count("needs: home-assistant-versions") == 2

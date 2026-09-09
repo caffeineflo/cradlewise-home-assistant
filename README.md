@@ -144,6 +144,11 @@ using its local state or command path.
 
 ## Home Assistant installation
 
+Home Assistant **2026.6.0 or newer** is required. The certificate repair flow
+imports `RepairsFlowResult`, which first ships in that release. CI tests both
+2026.6.0 and 2026.9.1, including setup without media dependencies. This minimum
+tracks the integration's API requirements, not the latest available HA release.
+
 Add the repository to HACS directly:
 
 [![Open your Home Assistant instance and add this repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=caffeineflo&repository=cradlewise-home-assistant&category=integration)
