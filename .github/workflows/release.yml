@@ -103,8 +103,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - home-assistant-version: "2026.8.0"
-            ha-test-version: "0.13.354"
+          - home-assistant-version: "2026.6.0"
+            ha-test-version: "0.13.336"
             minimum: true
           - home-assistant-version: "2026.9.1"
             ha-test-version: "0.13.364"

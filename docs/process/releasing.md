@@ -63,6 +63,16 @@ maintainers can run the live candidate gate before creating a release tag.
 7. Approve the `pypi` deployment after reviewing the built distribution. The
    workflow publishes the client, publishes the versioned bridge image, and
    creates the full GitHub release only after both publications succeed.
+8. If the HACS default-catalog submission is still open, update its description
+   to link the new release and its successful HACS/hassfest run. Don't post a
+   bump comment or merge the upstream catalog branch unless a maintainer asks.
+
+The minimum HA version is 2026.6.0 because the integration imports
+`RepairsFlowResult`, added in [Home Assistant core #170263](https://github.com/home-assistant/core/pull/170263).
+It is absent from 2026.5.0 and exported from 2026.6.0. Both PR and tag workflows
+test that exact minimum and the current 2026.9.1 baseline, including all config,
+repair, entity, and coordinator tests. Don't raise the minimum just to match a
+new test-package release; recheck the API and dependency requirements first.
 
 The privileged PyPI job only downloads and publishes the artifact produced by
 the unprivileged build job. The release guard rejects a tag unless it matches
