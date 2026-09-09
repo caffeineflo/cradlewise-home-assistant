@@ -71,7 +71,8 @@ The minimum HA version is 2026.6.0 because the integration imports
 `RepairsFlowResult`, added in [Home Assistant core #170263](https://github.com/home-assistant/core/pull/170263).
 It is absent from 2026.5.0 and exported from 2026.6.0. Both PR and tag workflows
 test that exact minimum and the current 2026.9.1 baseline, including all config,
-repair, entity, and coordinator tests. Don't raise the minimum just to match a
+repair, entity, and coordinator tests. Media test dependencies come from each
+tested core version's manifests. Don't raise the minimum just to match a
 new test-package release; recheck the API and dependency requirements first.
 
 The privileged PyPI job only downloads and publishes the artifact produced by
