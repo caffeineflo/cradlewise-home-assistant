@@ -2,12 +2,33 @@ import asyncio
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 import stream_local
 from cradlewise_local.streamer import BridgeStreamer
 from stream_local import CribStreamer, mqtt_server_ca_path
+
+
+@pytest.mark.parametrize("topic", ["beacon", "cradle", "get", "update"])
+@pytest.mark.parametrize(
+    "payload", [b"\xff", b'{"PRIVATE_CHILD":', b'["PRIVATE_CHILD"]']
+)
+def test_invalid_state_payload_is_ignored_without_logging_content(
+    topic, payload, caplog
+):
+    streamer = object.__new__(BridgeStreamer)
+    streamer.status_store = Mock()
+    streamer.beacon_topic = "beacon"
+    streamer.cradle_state_topic = "cradle"
+    streamer.shadow_get_accepted_topic = "get"
+    streamer.shadow_update_accepted_topic = "update"
+    streamer._on_message(None, None, SimpleNamespace(topic=topic, payload=payload))
+    streamer._on_message(None, None, SimpleNamespace(topic="beacon", payload=b"{}"))
+
+    streamer.status_store.update_beacon.assert_called_once_with({})
+    assert "PRIVATE_CHILD" not in caplog.text
 
 
 class FakeMqttClient:

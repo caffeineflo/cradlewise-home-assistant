@@ -175,6 +175,9 @@ device ID and certificate material, not that display name.
 
 To add video later, open the integration's Configure action, select **Configure
 optional media companion**, and enter the companion URL and bearer token.
+Leaving the token blank preserves it only for the same scheme, hostname, and
+port. If you change any of those, enter the token explicitly for the new endpoint;
+the integration will not forward the old endpoint's token automatically.
 HTTPS is required for any non-private destination. HTTP is accepted only when
 every resolved address is private, loopback, or link-local and you explicitly
 accept the plaintext trusted-LAN connection. Leaving the URL blank removes the

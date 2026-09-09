@@ -141,7 +141,7 @@ def test_camera_is_only_created_when_media_is_configured() -> None:
     assert "return" in source
 
 
-def test_account_and_certificate_secrets_are_redacted() -> None:
+def test_account_and_certificate_secrets_are_not_selected_for_diagnostics() -> None:
     source = (INTEGRATION_PATH / "diagnostics.py").read_text(encoding="utf-8")
 
     for constant in (
@@ -152,7 +152,26 @@ def test_account_and_certificate_secrets_are_redacted() -> None:
         "CONF_SERVER_CA_CERTIFICATE",
         "CONF_BEARER_TOKEN",
     ):
-        assert constant in source.split("TO_REDACT =", 1)[1].split("}", 1)[0]
+        assert constant not in source
+
+    tree = ast.parse(source)
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "async_get_config_entry_diagnostics"
+    )
+    exported = next(
+        node.value for node in function.body if isinstance(node, ast.Return)
+    )
+    assert isinstance(exported, ast.Dict)
+    config_entry = next(
+        value
+        for key, value in zip(exported.keys, exported.values)
+        if isinstance(key, ast.Constant) and key.value == "config_entry"
+    )
+    assert isinstance(config_entry, ast.Dict)
+    assert [key.id for key in config_entry.keys] == ["CONF_CONNECTION_MODE"]
 
 
 def test_local_only_flow_does_not_persist_account_password() -> None:

@@ -81,7 +81,15 @@ With no DSN, no error-reporting connection is attempted.
 ## Home Assistant diagnostics
 
 Home Assistant diagnostics are generated only when a user manually downloads
-them. The integration redacts account credentials, device certificate
-material, the bearer token, bridge and stream URLs, cradle ID, device ID, and
-snapshot URL. It includes versions, provider health, reconnect and frame
-counters, and data freshness, but not raw nursery or baby state.
+them. The integration exports an explicit allowlist: connection mode, whether
+media is configured, numeric versions, provider health, reconnect and frame
+counters, and data freshness. It does not copy config-entry data or options
+wholesale. New configuration fields are excluded unless deliberately added.
+
+Exports exclude account and child names, entry titles, crib and device IDs,
+credentials, certificates, addresses, URLs, raw nursery state, and free-form
+error messages. Malformed MQTT payloads are logged without their contents.
+
+Home Assistant can add its own system metadata around the integration's
+diagnostics. Review downloaded files and ordinary logs before sharing them.
+This change does not sanitize diagnostic files downloaded with older versions.

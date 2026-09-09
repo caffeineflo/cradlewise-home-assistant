@@ -524,12 +524,16 @@ class CloudAccountClient:
         raise error from last_error
 
 
-def _local_ip(payload: dict[str, Any]) -> str | None:
-    address = (
-        payload.get("info", {}).get("connectivity", {}).get("localIP")
-        if isinstance(payload.get("info"), dict)
-        else None
-    )
+def _local_ip(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    info = payload.get("info")
+    if not isinstance(info, dict):
+        return None
+    connectivity = info.get("connectivity")
+    if not isinstance(connectivity, dict):
+        return None
+    address = connectivity.get("localIP")
     return address.strip() if isinstance(address, str) and address.strip() else None
 
 

@@ -403,3 +403,30 @@ def test_certificate_download_does_not_hide_unexpected_errors():
 
     with pytest.raises(RuntimeError, match="programming failure"):
         CloudAccountClient._download_s3_text(BrokenS3(), "crib/cert.pem")
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        [],
+        None,
+        "unexpected",
+        {"info": None},
+        {"info": {"connectivity": []}},
+        {"info": {"connectivity": None}},
+        {"info": {"connectivity": {"localIP": []}}},
+    ],
+)
+def test_malformed_v2_discovery_uses_v1_fallback(monkeypatch, state):
+    session = FakeSession(
+        [
+            FakeResponse(200, {"state_message": json.dumps(state)}),
+            FakeResponse(200, {"local_ip": "192.0.2.10"}),
+        ]
+    )
+    client = _authenticated(
+        CloudAccountClient(email="user@example.com", password="secret", session=session)
+    )
+    monkeypatch.setattr(cloud, "sign_request", lambda *args, **kwargs: {})
+
+    assert client.get_cradle_ip("crib-1") == "192.0.2.10"
