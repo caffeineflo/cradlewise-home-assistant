@@ -468,20 +468,19 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 json={"command": command, "value": value},
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
-                detail = await response.text()
                 if response.status == 401:
                     raise HomeAssistantError("Media companion authentication failed")
                 if response.status != 200:
                     raise HomeAssistantError(
-                        "Media companion command failed with HTTP "
-                        f"{response.status}: {detail}"
+                        f"Media companion command failed with HTTP {response.status}"
                     )
         except HomeAssistantError:
             raise
         except (aiohttp.ClientError, TimeoutError) as exc:
+            # Transport exception text and its traceback can contain private URLs.
             raise HomeAssistantError(
-                f"Media companion command request failed: {exc}"
-            ) from exc
+                f"Media companion command request failed ({type(exc).__name__})"
+            ) from None
         await self.async_request_refresh()
 
     def _handle_mqtt_update(self, source: str, update: LocalCradleUpdate) -> None:
