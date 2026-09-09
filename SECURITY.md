@@ -5,6 +5,13 @@
 Security fixes are applied to the latest published release and the `main`
 branch.
 
+The optional bridge image is scanned for OS and application dependencies on
+both supported architectures before release and weekly after publication.
+Fixable high/critical findings block release; unfixed findings remain visible
+in the complete reports and require maintainer review. See
+[Image Security](docs/process/image-security.md) for the current assessment
+and the limits of this gate.
+
 ## Reporting a vulnerability
 
 Report vulnerabilities through GitHub's private security advisory feature.

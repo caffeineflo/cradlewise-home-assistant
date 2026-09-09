@@ -30,6 +30,8 @@ receives a short-lived PyPI OIDC publishing identity only after the environment
 is approved, and GitHub provides the tag workflow a repository-scoped package
 token. Ordinary pull request and `main` CI builds the bridge image without
 publishing it.
+CI retains the tested architecture-specific image artifacts for seven days so
+maintainers can run the live candidate gate before creating a release tag.
 
 ## Release checklist
 
@@ -42,11 +44,15 @@ publishing it.
    - the default bridge image in `examples/docker-compose.yaml`
 2. Update `CHANGELOG.md` and move the release notes out of `Unreleased`.
 3. Run the Python 3.10, 3.12, and 3.14 test matrix, Home Assistant runtime
-   tests, Ruff, yamllint, hassfest, package builds, and the bridge image build.
+   tests, Ruff, yamllint, hassfest, package builds, and both bridge image builds.
    The official HACS action must also pass against the pushed GitHub ref; local
    manifest-schema checks do not replace its repository metadata and tree
    checks. Confirm that Dependabot reports zero open alerts. The tag workflow
    enforces this before it can publish the client package or bridge image.
+   Both final images must also pass the restricted-runtime, offline API startup,
+   shutdown, and FFmpeg smoke tests, plus the complete-image vulnerability scan.
+   Review unfixed findings against [Image Security](image-security.md). A green
+   automated scan gate does not mean there are no unfixed vulnerabilities.
 4. Install the release candidate on Home Assistant and verify Automatic,
    Local only, Cloud only, reauthentication, reconfiguration, unload/reload,
    and optional media behavior.
@@ -64,6 +70,13 @@ the root and client package versions, integration version and requirement,
 example environment, and Compose bridge default. After PyPI shows the new
 client version, confirm that a clean HACS install can resolve the integration
 requirement.
+
+Version parity is a shared prerequisite for both artifact builds. Neither
+publisher runs until the client distribution and both architecture-specific
+images have been built and validated. The GHCR publisher loads the tested
+image artifacts instead of rebuilding them. Registry publication is not atomic
+across PyPI and GHCR: a registry failure after one publish still needs maintainer
+recovery, and the GitHub release waits for both publications to succeed.
 
 ### Maintainer live end-to-end gate
 
@@ -86,12 +99,13 @@ Run this loop against a crib that is safe to actuate:
    at 48 kHz when audio is enabled.
 4. Toggle music and bounce on and back off. Require the reported entities to
    follow both changes, and leave both controls off after the test.
-5. Stop only the optional media companion. Require Automatic mode to select the
-   cloud provider, keep device state available, make the camera unavailable,
-   and keep commands available.
+5. With the media companion configured in Automatic mode, stop only the
+   companion. Require HA to fall back to cloud state and controls while the
+   camera becomes unavailable. This installation uses the companion for its
+   local state/control path; it does not also start a direct local MQTT client.
 6. Start the companion. Require it to become healthy, Automatic mode to prefer
-   the local provider again, the RTSP probe to pass, and the HA camera proxy to
-   return a new image.
+   local state again, the RTSP probe to pass, and the HA camera proxy to return
+   a new image.
 7. Reconfigure in place through Cloud only, Local only, and back to Automatic.
    Require the selected provider in each mode, confirm Local only removes stored
    email/password fields, and restore Automatic using the existing credentials.
@@ -102,6 +116,10 @@ Run this loop against a crib that is safe to actuate:
 Do not automate invalid-password reauthentication against the live account.
 Exercise that path with the Home Assistant runtime tests, then confirm the live
 cloud path authenticates normally during Cloud-only and Automatic mode checks.
+The runtime suite also forces local-provider failure and recovery to verify
+Automatic fallback. Without a configured companion, HA uses direct local MQTT;
+a live fallback test for that installation needs a separately approved
+interruption of that MQTT path.
 
 ## HACS default catalog
 
