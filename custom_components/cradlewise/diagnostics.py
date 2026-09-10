@@ -114,7 +114,10 @@ async def async_get_config_entry_diagnostics(
                     "closed",
                 },
             ),
-            "video_track": strict_bool(path_value(data, ("media", "video_track"))),
+            "video_received": (
+                _number(path_value(data, ("media", "video_frames"))) or 0
+            )
+            > 0,
             "audio_track": strict_bool(path_value(data, ("media", "audio_track"))),
             "video_frames": _number(path_value(data, ("media", "video_frames"))),
             "audio_frames": _number(path_value(data, ("media", "audio_frames"))),

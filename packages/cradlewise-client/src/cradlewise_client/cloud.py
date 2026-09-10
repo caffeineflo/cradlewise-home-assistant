@@ -98,6 +98,49 @@ def sign_request(
     return dict(request.headers)
 
 
+def authenticate(email, password):
+    """Authenticate with Cognito and return (cognito, id_token).
+
+    Raises Exception on auth failure.
+    """
+    cognito = Cognito(
+        USER_POOL_ID,
+        CLIENT_ID,
+        username=email,
+        client_secret=CLIENT_SECRET,
+    )
+    cognito.authenticate(password=password)
+    return cognito, cognito.id_token
+
+
+def get_aws_credentials(id_token):
+    """Exchange a Cognito id_token for temporary AWS credentials.
+
+    Returns (Credentials, raw_creds_dict) where raw_creds_dict has
+    AccessKeyId, SecretKey, SessionToken for direct boto3 use.
+    """
+    identity_client = boto3.client("cognito-identity", region_name=REGION)
+    logins = {
+        f"cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}": id_token,
+    }
+
+    identity_resp = identity_client.get_id(
+        IdentityPoolId=IDENTITY_POOL_ID,
+        Logins=logins,
+    )
+    creds_resp = identity_client.get_credentials_for_identity(
+        IdentityId=identity_resp["IdentityId"],
+        Logins=logins,
+    )
+    aws_creds = creds_resp["Credentials"]
+    credentials = Credentials(
+        access_key=aws_creds["AccessKeyId"],
+        secret_key=aws_creds["SecretKey"],
+        token=aws_creds["SessionToken"],
+    )
+    return credentials, aws_creds
+
+
 class CloudAccountClient:
     """Blocking account client intended for an executor in async consumers."""
 
@@ -119,36 +162,12 @@ class CloudAccountClient:
     def authenticate(self) -> None:
         """Authenticate with Cognito and cache temporary AWS credentials."""
         try:
-            cognito = Cognito(
-                USER_POOL_ID,
-                CLIENT_ID,
-                username=self.email,
-                client_secret=CLIENT_SECRET,
-            )
-            cognito.authenticate(password=self._password)
-            if not cognito.id_token:
+            _, id_token = authenticate(self.email, self._password)
+            if not id_token:
                 raise CloudAuthenticationError(
                     "Cradlewise authentication returned no ID token"
                 )
-            identity = boto3.client("cognito-identity", region_name=REGION)
-            logins = {
-                f"cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}": (cognito.id_token)
-            }
-            identity_response = identity.get_id(
-                IdentityPoolId=IDENTITY_POOL_ID,
-                Logins=logins,
-            )
-            credentials_response = identity.get_credentials_for_identity(
-                IdentityId=identity_response["IdentityId"],
-                Logins=logins,
-            )
-            raw = credentials_response["Credentials"]
-            self._credentials = Credentials(
-                access_key=raw["AccessKeyId"],
-                secret_key=raw["SecretKey"],
-                token=raw["SessionToken"],
-            )
-            self._raw_credentials = raw
+            self._credentials, self._raw_credentials = get_aws_credentials(id_token)
         except CloudAuthenticationError:
             raise
         except ClientError as exc:
@@ -206,6 +225,23 @@ class CloudAccountClient:
             "GET",
             f"{API_ENDPOINT}/cradles/{cradle_id}/state",
         )
+
+    def get_cradle_online_status(self, cradle_id: str) -> dict[str, Any]:
+        """Read backend crib/service liveness, not a cached v2 state message.
+
+        The Android online-status monitor consumes these two alive flags.
+        onlineStatus/v2 contains a last-reported state and is used only for IP
+        discovery; fetching it again does not establish fresh liveness.
+        """
+        payload = self._request_json(
+            "GET", f"{API_ENDPOINT}/cradles/{cradle_id}/onlineStatus"
+        )
+        if not all(
+            isinstance(payload.get(key), bool)
+            for key in ("is_cradle_alive", "is_cradle_service_alive")
+        ):
+            raise CloudApiError("Cradlewise online status has no valid crib status")
+        return payload
 
     def get_cradle_ip(self, cradle_id: str) -> str | None:
         """Resolve the last reported local address, preferring onlineStatus v2."""

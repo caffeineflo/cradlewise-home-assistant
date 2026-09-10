@@ -1,16 +1,81 @@
 import json
 import socket
+import threading
 import urllib.error
 import urllib.request
 
 import pytest
+from cradlewise_client.state import normalize_device_state
 
 from cradlewise_local.status import (
+    BoundedThreadingHTTPServer,
     BridgeStatusHttpServer,
     BridgeStatusStore,
+    _device_state_snapshot,
 )
 
 pytestmark = pytest.mark.enable_socket
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        {"baby_present": True},
+        {
+            "state": {
+                "reported": {
+                    "babyPresent": False,
+                    "control": {"adaptiveSoothingEnabled": True},
+                    "soundSynth": {"play": True, "volume": 20},
+                    "babySleepPhaseV2": {"eventValue": 4},
+                }
+            }
+        },
+    ],
+)
+def test_companion_matches_every_shared_state_field(payload):
+    expected = normalize_device_state(payload)
+    actual = _device_state_snapshot(payload)
+    assert {key: actual[key] for key in expected} == expected
+
+
+def test_http_rejects_overflow_before_creating_another_worker(monkeypatch):
+    admitted = threading.Event()
+    released = threading.Event()
+    original = BoundedThreadingHTTPServer.process_request_thread
+    workers = []
+
+    def process(server, request, address):
+        workers.append(threading.get_ident())
+        admitted.set()
+        try:
+            return original(server, request, address)
+        finally:
+            released.set()
+
+    monkeypatch.setattr(BoundedThreadingHTTPServer, "max_connections", 1)
+    monkeypatch.setattr(BoundedThreadingHTTPServer, "process_request_thread", process)
+    server = BridgeStatusHttpServer(
+        BridgeStatusStore("crib", "127.0.0.1"), "127.0.0.1", 0
+    )
+    server.start()
+    try:
+        address = server._httpd.server_address
+        with socket.create_connection(address, timeout=2) as idle:
+            assert admitted.wait(2)
+            with socket.create_connection(address, timeout=2) as overflow:
+                assert overflow.recv(1) == b""
+            assert len(workers) == 1
+            # An idle admitted connection must time out and release its slot.
+            assert released.wait(7)
+            assert idle.recv(1) == b""
+        with urllib.request.urlopen(
+            f"http://{address[0]}:{address[1]}/live", timeout=2
+        ) as response:
+            assert response.status == 200
+    finally:
+        server.close()
 
 
 def _free_port() -> int:

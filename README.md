@@ -191,8 +191,9 @@ camera and does not affect state, controls, device identity, or other entities.
 Home Assistant creates a Repair if the provisioned client certificate is
 missing, malformed, expired, not valid yet, or within 30 days of expiration.
 The repair provisions and validates a replacement without changing the config
-entry, integration device, or entity IDs. Removing the previous registration
-after successful repair is optional and off by default.
+entry, integration device, or entity IDs. Repair keeps the previous registration
+intact. After verifying the replacement works, you can remove the unused old
+device separately in the Cradlewise app. Do not remove the new registration.
 
 Removing the integration normally leaves its provisioned device registration
 in the Cradlewise account. To remove both deliberately, open **Configure**,
@@ -222,7 +223,7 @@ to validate both integrations side by side and preserve referenced entity IDs.
 ## Optional Wake Event Recording
 
 The repository includes an optional native Home Assistant automation that
-records wake events with two minutes of lookback and two minutes after each
+records wake events with short, best-effort pre-roll and two minutes after each
 trigger. It uses `camera.record`, stores clips under Home Assistant's
 authenticated `/media` directory, and deletes clips older than 14 days with a
 short daily maintenance command. It does not run a separate ffmpeg recorder or
@@ -256,8 +257,10 @@ uv run cradlewise-pin-mqtt-ca \
   --certs-dir certs/<cradle_id>
 ```
 
-The command validates the broker identity, certificate signatures, validity
-period, and crib IP before writing `server_ca.pem`. It refuses to replace a
+This is trust-on-first-use: use a trusted network for initial pinning. The
+command checks the expected certificate shape, signatures, validity period,
+and crib IP before writing `server_ca.pem`. A self-issued CA is not proof of
+vendor-authenticated identity on an untrusted first connection. It refuses to replace a
 different existing pin unless you pass `--replace` after verifying the crib's
 firmware-driven CA change.
 

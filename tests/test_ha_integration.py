@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from cradlewise_client.cloud import CLIENT_SECRET
+from cradlewise_client.cloud import CLIENT_SECRET, CloudAuthenticationError
 
 try:
     from homeassistant import config_entries, data_entry_flow
@@ -49,7 +50,6 @@ from custom_components.cradlewise.const import (
     CONF_DEVICE_ID,
     CONF_GROUP_CA_CERTIFICATE,
     CONF_LOCAL_HOST,
-    CONF_REMOVE_OLD_REGISTRATION,
     CONF_SERVER_CA_CERTIFICATE,
     CONF_SNAPSHOT_URL,
     CONF_STREAM_URL,
@@ -1053,7 +1053,7 @@ async def test_certificate_repair_boundary_timer_is_cancelable(
     assert (tracked_updates, cancel_timer.call_count) == ([next_update], 1)
 
 
-async def test_certificate_repair_preserves_identity_and_can_remove_old_registration(
+async def test_certificate_repair_preserves_identity_and_previous_registration(
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1108,7 +1108,6 @@ async def test_certificate_repair_preserves_identity_and_can_remove_old_registra
         {
             CONF_EMAIL: "parent@example.com",
             CONF_PASSWORD: "new-secret",
-            CONF_REMOVE_OLD_REGISTRATION: True,
         }
     )
 
@@ -1123,7 +1122,7 @@ async def test_certificate_repair_preserves_identity_and_can_remove_old_registra
         old_entry_id,
         CRADLE_ID,
         "replacement-device",
-        [[DEVICE_ID]],
+        [],
     )
     assert schedule_reload.call_count == 0
 
@@ -1170,7 +1169,6 @@ async def test_certificate_repair_rolls_back_registration_when_local_pin_fails(
         {
             CONF_EMAIL: "parent@example.com",
             CONF_PASSWORD: "secret",
-            CONF_REMOVE_OLD_REGISTRATION: False,
         }
     )
 
@@ -1179,6 +1177,146 @@ async def test_certificate_repair_rolls_back_registration_when_local_pin_fails(
         [["replacement-device"]],
         DEVICE_ID,
     )
+
+
+@pytest.mark.parametrize("kind", ["setup", "repair"])
+async def test_cancelled_provisioning_removes_only_new_registration(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    account = CradleAccount(42, CRADLE_ID, "Synthetic crib")
+    credentials = ProvisionedCredentials("new-device", "cert", "key", "CA")
+    started = threading.Event()
+    finish = threading.Event()
+    cloud = Mock()
+    cloud.list_accounts.return_value = [account]
+    cloud.remove_user_devices.side_effect = lambda account, ids: ids
+
+    def provision(*args, **kwargs):
+        started.set()
+        if not finish.wait(5):
+            raise RuntimeError("test did not release provisioner")
+        return credentials
+
+    cloud.provision_credentials.side_effect = provision
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            **_base_entry_data(),
+            CONF_CONNECTION_MODE: CONNECTION_MODE_CLOUD,
+        },
+    )
+    entry.add_to_hass(hass)
+    if kind == "setup":
+        flow = CradlewiseConfigFlow()
+        flow.context = {"source": "user"}
+        flow.hass = hass
+        flow._cloud = cloud
+        flow._mode = CONNECTION_MODE_CLOUD
+        operation = flow._async_create_account_entry(account)
+    else:
+        monkeypatch.setattr(
+            "custom_components.cradlewise.repairs.CloudAccountClient",
+            Mock(return_value=cloud),
+        )
+        monkeypatch.setattr(
+            "custom_components.cradlewise.repairs.client_certificate_validity",
+            lambda pem: (time_to_datetime(-60), time_to_datetime(3600)),
+        )
+        flow = ClientCertificateRepairFlow(entry)
+        flow.hass = hass
+        operation = flow.async_step_reprovision(
+            {CONF_EMAIL: "parent@example.com", CONF_PASSWORD: "secret"}
+        )
+    task = asyncio.create_task(operation)
+    try:
+        did_start = await asyncio.to_thread(started.wait, 2)
+        if task.done():
+            await task
+        assert did_start
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+    finally:
+        finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (
+        cloud.remove_user_devices.call_args.args[1],
+        entry.data[CONF_DEVICE_ID],
+    ) == (["new-device"], DEVICE_ID)
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+async def test_repair_rolls_back_authentication_failure_after_provisioning(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, cleanup_fails: bool
+) -> None:
+    cloud = Mock()
+    account = CradleAccount(42, CRADLE_ID, "Synthetic crib")
+    cloud.list_accounts.return_value = [account]
+    cloud.provision_credentials.return_value = ProvisionedCredentials(
+        "new-device", "cert", "key", "CA"
+    )
+    cloud.remove_user_devices.return_value = ["new-device"]
+    if cleanup_fails:
+        cloud.remove_user_devices.side_effect = CloudAuthenticationError(
+            "cleanup rejected"
+        )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.CloudAccountClient",
+        Mock(return_value=cloud),
+    )
+    monkeypatch.setattr(
+        "custom_components.cradlewise.repairs.client_certificate_validity",
+        lambda pem: (time_to_datetime(-60), time_to_datetime(3600)),
+    )
+    flow = ClientCertificateRepairFlow(
+        MockConfigEntry(domain=DOMAIN, data=_base_entry_data())
+    )
+    flow.hass = hass
+    monkeypatch.setattr(
+        flow,
+        "_pin_local_credentials",
+        Mock(side_effect=CloudAuthenticationError("expired session")),
+    )
+    result = await flow.async_step_reprovision(
+        {CONF_EMAIL: "parent@example.com", CONF_PASSWORD: "secret"}
+    )
+    assert (result["errors"], cloud.remove_user_devices.call_args.args[1]) == (
+        {"base": "registration_cleanup_failed" if cleanup_fails else "invalid_auth"},
+        ["new-device"],
+    )
+
+
+async def test_native_recording_caps_lookback_to_available_segment_durations(
+    hass: HomeAssistant,
+) -> None:
+    from collections import deque
+
+    from homeassistant.components.stream import Stream
+    from homeassistant.components.stream.const import MAX_SEGMENTS
+    from homeassistant.components.stream.recorder import RecorderOutput
+
+    segments = deque(
+        (SimpleNamespace(duration=6.0) for _ in range(20)), maxlen=MAX_SEGMENTS
+    )
+    hls = SimpleNamespace(
+        target_duration=6.0, recv=AsyncMock(), get_segments=lambda: segments
+    )
+    recorder = Mock(spec=RecorderOutput)
+    recorder.async_record = AsyncMock()
+    stream = SimpleNamespace(
+        hass=hass,
+        outputs=lambda: {"hls": hls},
+        add_provider=Mock(return_value=recorder),
+        start=AsyncMock(),
+        _logger=Mock(),
+    )
+    hass.config.allowlist_external_dirs.add("/media")
+    await Stream.async_record(stream, "/media/test.mp4", duration=15, lookback=120)
+    actual_lookback = sum(
+        segment.duration for segment in recorder.prepend.call_args.args[0]
+    )
+    assert actual_lookback == (MAX_SEGMENTS - 1) * 6.0 < 120
 
 
 async def test_setup_with_media_creates_only_focused_entity_surface(

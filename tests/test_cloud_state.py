@@ -1,6 +1,8 @@
 import asyncio
 from pathlib import Path
 
+import cradlewise_client.cloud as client_cloud
+
 import cradlewise_local.cloud_state as cloud_state
 from cradlewise_local.cloud_state import CradlewiseCloudStateClient
 from cradlewise_local.config import BridgeConfig
@@ -17,7 +19,7 @@ class FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise cloud_state.requests.HTTPError(f"HTTP {self.status_code}")
+            raise client_cloud.requests.HTTPError(f"HTTP {self.status_code}")
 
 
 def write_cert_set(path: Path) -> None:
@@ -37,21 +39,21 @@ def test_cloud_state_client_reauthenticates_on_forbidden(monkeypatch):
         auth_calls.append((email, password))
         return object(), f"token-{len(auth_calls)}"
 
-    monkeypatch.setattr(cloud_state, "authenticate", fake_authenticate)
+    monkeypatch.setattr(client_cloud, "authenticate", fake_authenticate)
     monkeypatch.setattr(
-        cloud_state,
+        client_cloud,
         "get_aws_credentials",
         lambda id_token: (f"creds-for-{id_token}", {}),
     )
     monkeypatch.setattr(
-        cloud_state,
+        client_cloud,
         "sign_request",
-        lambda method, url, credentials: {"Authorization": str(credentials)},
+        lambda method, url, credentials, **kwargs: {"Authorization": str(credentials)},
     )
     monkeypatch.setattr(
-        cloud_state.requests,
-        "get",
-        lambda url, headers, timeout: responses.pop(0),
+        client_cloud.requests.Session,
+        "request",
+        lambda self, *args, **kwargs: responses.pop(0),
     )
 
     client = CradlewiseCloudStateClient(
@@ -74,6 +76,9 @@ def test_cloud_state_poller_updates_device_state(monkeypatch, tmp_path):
 
         def get_cradle_state(self, cradle_id):
             return {"babyPresent": True, "babySleepPhaseV2": {"eventValue": 4}}
+
+        def get_cradle_online_status(self, cradle_id):
+            return {"is_cradle_alive": True, "is_cradle_service_alive": True}
 
     async def run_once():
         config = BridgeConfig.from_values(

@@ -21,7 +21,6 @@ CONF_BRIDGE_API_VERSION = "bridge_api_version"
 CONF_BRIDGE_VERSION = "bridge_version"
 CONF_ALLOW_INSECURE_HTTP = "allow_insecure_http"
 CONF_CONFIRM_REGISTRATION_REMOVAL = "confirm_registration_removal"
-CONF_REMOVE_OLD_REGISTRATION = "remove_old_registration"
 
 CONNECTION_MODE_AUTOMATIC = "automatic"
 CONNECTION_MODE_LOCAL = "local"

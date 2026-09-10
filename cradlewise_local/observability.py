@@ -64,6 +64,13 @@ def _cgroup_pid_count() -> int | None:
         return None
 
 
+def _process_open_fd_count() -> int | None:
+    try:
+        return len(list(Path("/proc/self/fd").iterdir()))
+    except OSError:
+        return None
+
+
 def render_prometheus_metrics(
     snapshot: dict[str, Any],
     *,
@@ -102,6 +109,12 @@ def render_prometheus_metrics(
             "gauge",
             "Native threads in the bridge process.",
             _process_thread_count(),
+        ),
+        (
+            "cradlewise_bridge_process_open_fds",
+            "gauge",
+            "Open file descriptors in the bridge process.",
+            _process_open_fd_count(),
         ),
         (
             "cradlewise_bridge_cgroup_pids",

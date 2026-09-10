@@ -31,6 +31,8 @@ DEVICE_STATE_KEYS = {
     "babyNeedsAttention",
     "babyNeedsHelp",
     "babyPresent",
+    "baby_present",
+    "baby_sleep_state",
     "babySleepPhase",
     "babySleepPhaseV2",
     "babySleepState",
@@ -133,6 +135,36 @@ def merge_state(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def cradle_is_active(payload: dict[str, Any]) -> bool | None:
+    """Read crib/service liveness, not the MQTT connection or device shadow.
+
+    Android 2.55.5 MqttUtils.parseCradleStateMessage defines the v2 states.
+    The legacy onlineStatus endpoint reports two independent alive flags.
+    """
+    alive = payload.get("is_cradle_alive")
+    service_alive = payload.get("is_cradle_service_alive")
+    if alive is False or service_alive is False:
+        return False
+    if alive is True and service_alive is True:
+        return True
+    state = _nested(payload, "state", "state")
+    if type(state) is not int:
+        return None
+    if state in {0, 2}:
+        return False
+    if state != 1:
+        return None
+    mode = _nested(payload, "state", "info", "opMode")
+    if type(mode) is not int:
+        return None
+    if mode in {0, 2, 3}:
+        return False
+    if mode != 1:
+        return None
+    service = _nested(payload, "state", "info", "status", "cradle", "state")
+    return service == 0 if type(service) is int else None
+
+
 def _sleep_phase(state: dict[str, Any] | None) -> str | None:
     raw = _int(
         _first(
@@ -196,7 +228,9 @@ def normalize_device_state(payload: dict[str, Any] | None) -> dict[str, Any]:
     )
     result = {
         "baby_present": _bool(
-            _first(state, ("babyPresent",), ("rawShadow", "babyPresent"))
+            _first(
+                state, ("babyPresent",), ("baby_present",), ("rawShadow", "babyPresent")
+            )
         ),
         "baby_needs_attention": _bool(
             _first(
@@ -393,6 +427,8 @@ class _ProviderState:
     updated_at: float | None = None
     connected: bool = False
     error: str | None = None
+    operational: bool | None = None
+    status_updated_at: float | None = None
 
 
 @dataclass
@@ -442,15 +478,36 @@ class CradlewiseStateStore:
     def update_cradle_state(
         self,
         payload: dict[str, Any],
+        source: str = "local",
         *,
         updated_at: float | None = None,
     ) -> None:
-        """Store local connectivity state and any embedded device report."""
+        """Store device liveness separately from shadow values."""
         timestamp = time.time() if updated_at is None else updated_at
-        self._cradle_state = copy.deepcopy(payload)
-        self._cradle_state_updated_at = timestamp
+        active = cradle_is_active(payload)
+        if active is not None:
+            provider = self._provider(source)
+            provider.operational = active
+            provider.status_updated_at = timestamp
+        if source == "local":
+            self._cradle_state = copy.deepcopy(payload)
+            self._cradle_state_updated_at = timestamp
         if extract_reported_state(payload) is not None:
-            self.update_device_state(payload, "local", updated_at=timestamp)
+            self.update_device_state(payload, source, updated_at=timestamp)
+
+    def command_available(self, source: str, *, now: float | None = None) -> bool:
+        """Require an active crib before sending commands through AWS IoT."""
+        provider = self._provider(source)
+        if not provider.connected or provider.operational is False:
+            return False
+        if source == "local":
+            return True
+        timestamp = time.time() if now is None else now
+        return (
+            provider.operational is True
+            and provider.status_updated_at is not None
+            and 0 <= timestamp - provider.status_updated_at <= self.cloud_stale_after
+        )
 
     def mark_error(self, source: str, error: str) -> None:
         """Record a provider error without discarding its last known values."""
@@ -552,9 +609,21 @@ class CradlewiseStateStore:
         timeout = (
             self.cloud_stale_after if source == "cloud" else self.local_stale_after
         )
-        stale = updated_at is None or (
-            not provider.connected and now - updated_at > timeout
+        fresh_report = updated_at is not None and 0 <= now - updated_at <= timeout
+        status_fresh = (
+            provider.status_updated_at is not None
+            and 0 <= now - provider.status_updated_at <= timeout
         )
+        if provider.operational is False:
+            stale = True
+        elif source == "local":
+            stale = updated_at is None or not (provider.connected or fresh_report)
+        elif provider.operational is True:
+            stale = not (status_fresh and (provider.connected or fresh_report))
+        else:
+            # An initial shadow can populate the UI briefly, but never enables
+            # cloud commands without a separate positive liveness observation.
+            stale = not fresh_report
         return {
             "connected": provider.connected,
             "updated_at": updated_at,
@@ -563,4 +632,6 @@ class CradlewiseStateStore:
             ),
             "stale": stale,
             "error": provider.error,
+            "operational": provider.operational,
+            "status_updated_at": provider.status_updated_at,
         }

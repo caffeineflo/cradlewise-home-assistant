@@ -1,4 +1,50 @@
-from cradlewise_client.state import CradlewiseStateStore, normalize_device_state
+import pytest
+from cradlewise_client.state import (
+    CradlewiseStateStore,
+    cradle_is_active,
+    normalize_device_state,
+)
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({}, None),
+        ({"state": {"state": True}}, None),
+        ({"state": {"state": 0}}, False),
+        ({"state": {"state": 2}}, False),
+        ({"state": {"state": 1, "info": {"opMode": 2}}}, False),
+        (
+            {
+                "state": {
+                    "state": 1,
+                    "info": {"opMode": 1, "status": {"cradle": {"state": 1}}},
+                }
+            },
+            False,
+        ),
+        ({"is_cradle_alive": True, "is_cradle_service_alive": False}, False),
+        ({"is_cradle_alive": True}, None),
+    ],
+)
+def test_operational_status_distinguishes_unknown_offline_and_recovery(
+    payload, expected
+):
+    assert cradle_is_active(payload) is expected
+
+
+def test_cloud_command_eligibility_expires_even_with_connected_mqtt():
+    store = CradlewiseStateStore("crib", cloud_stale_after=90)
+    store.set_connected("cloud", True)
+    store.update_cradle_state(
+        {"is_cradle_alive": True, "is_cradle_service_alive": True},
+        "cloud",
+        updated_at=1000,
+    )
+    assert (
+        store.command_available("cloud", now=1089),
+        store.command_available("cloud", now=1091),
+    ) == (True, False)
 
 
 def _local_state(**overrides):
@@ -94,14 +140,59 @@ def test_store_falls_back_after_local_state_becomes_stale():
     assert (state["baby_present"], state["source"]) == (True, "cloud")
 
 
-def test_connected_provider_state_does_not_expire_while_shadow_is_idle():
+def test_connected_cloud_broker_does_not_keep_old_shadow_available():
     store = CradlewiseStateStore("cradle-1", cloud_stale_after=90)
     store.set_connected("cloud", True)
     store.update_device_state({"babyPresent": True}, "cloud", updated_at=1_000)
 
     state = store.snapshot(now=2_000)["device_state"]
 
-    assert (state["available"], state["baby_present"]) == (True, True)
+    assert (state["available"], state["baby_present"]) == (False, True)
+
+
+def _active_cradle():
+    return {
+        "state": {"state": 1, "info": {"opMode": 1, "status": {"cradle": {"state": 0}}}}
+    }
+
+
+def test_recent_cloud_liveness_keeps_an_idle_shadow_available():
+    store = CradlewiseStateStore("cradle-1")
+    store.set_connected("cloud", True)
+    store.update_device_state(_local_state(), "cloud", updated_at=1000)
+    store.update_cradle_state(_active_cradle(), "cloud", updated_at=1999)
+
+    assert store.snapshot(now=2000)["device_state"]["available"] is True
+
+
+@pytest.mark.parametrize("source", ["local", "cloud"])
+def test_explicit_offline_status_invalidates_recent_shadow(source):
+    store = CradlewiseStateStore("cradle-1")
+    store.set_connected(source, True)
+    store.update_device_state(_local_state(), source, updated_at=1000)
+    store.update_cradle_state({"state": {"state": 0}}, source, updated_at=1001)
+
+    assert store.snapshot(now=1002)["device_state"]["available"] is False
+
+
+def test_cloud_liveness_expires_while_broker_stays_connected():
+    store = CradlewiseStateStore("cradle-1", cloud_stale_after=90)
+    store.set_connected("cloud", True)
+    store.update_device_state(_local_state(), "cloud", updated_at=1000)
+    store.update_cradle_state(_active_cradle(), "cloud", updated_at=1000)
+    store.mark_error("cloud", "Synthetic request failure")
+
+    assert store.snapshot(now=1091)["device_state"]["available"] is False
+
+
+def test_online_status_restores_cloud_state_after_offline_message():
+    store = CradlewiseStateStore("cradle-1")
+    store.set_connected("cloud", True)
+    store.update_device_state(_local_state(), "cloud", updated_at=1000)
+    store.update_cradle_state({"state": {"state": 0}}, "cloud", updated_at=1001)
+    store.update_cradle_state(_active_cradle(), "cloud", updated_at=1002)
+
+    assert store.snapshot(now=1003)["device_state"]["available"] is True
 
 
 def test_store_accepts_normalized_media_companion_state():

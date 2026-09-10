@@ -5,9 +5,9 @@ action to save short wake-event clips. No helper script, background process,
 extra FFmpeg process, or public web gallery is required. One short daily shell
 command deletes expired media; it does not supervise a process.
 
-Each recording requests two minutes of HLS lookback plus two minutes after the
-trigger. Home Assistant writes the resulting MP4 directly under `/media`, where
-it remains behind Home Assistant authentication.
+Each recording saves approximately two minutes after the trigger, plus whatever
+short pre-roll Home Assistant has buffered. It does not guarantee two minutes
+before the trigger. The MP4 stays under `/media`, behind HA authentication.
 
 ## Requirements
 
@@ -42,9 +42,8 @@ the crib name chosen in your Cradlewise account and can differ between homes.
 5. Run `ha core check`. Restart Core once to load the shell command, then
    reload automations. Later automation-only edits need only an automation
    reload.
-6. After enabling preload or restarting Home Assistant, allow at least two
-   minutes for the lookback buffer to fill before expecting a complete
-   pre-trigger window.
+6. After enabling preload or restarting Home Assistant, allow a few stream
+   segments to accumulate. Waiting longer does not expand HA's bounded buffer.
 
 Recordings appear under Local Media in Home Assistant and on disk at:
 
@@ -125,15 +124,20 @@ clip still covers that later trigger's point in time.
 
 ## Lookback Limitations
 
-`lookback: 120` is a request to Home Assistant, not a guaranteed frame-exact
-duration. The actual pre-roll depends on the HLS stream already being active
-and having enough buffered media. The actual total duration can also vary by a
-few seconds at stream segment boundaries.
+`lookback: 120` requests up to 120 seconds, but HA 2026.9.1 keeps at most five
+HLS segments. Segment length determines the available pre-roll; the limit is
+not a two-minute rolling buffer. See HA's [stream constants](https://github.com/home-assistant/core/blob/2026.9.1/homeassistant/components/stream/const.py)
+and [recording implementation](https://github.com/home-assistant/core/blob/2026.9.1/homeassistant/components/stream/__init__.py).
 
-Verify after installation that recordings contain audio, approximately two
-minutes before the trigger, and approximately two minutes after it. If preload
-is disabled or the stream recently restarted, Home Assistant can still record
-the post-trigger portion but may have little or no lookback.
+Verify audio and actual duration after installation. As one empty-crib check,
+120 seconds of requested lookback plus 15 seconds of forward recording produced
+a 40.9-second MP4, not a 135-second clip. This is an example, not a guaranteed
+window. Segment boundaries, stream restarts, and preload affect the result.
+After a restart or with preload disabled, little or no pre-roll may be available.
+
+Use a recorder with an explicit rolling buffer if you require a guaranteed
+two-minute pre-trigger window. This example does not change HA's internal limits
+or run an additional recorder.
 
 ## Retention And Privacy
 

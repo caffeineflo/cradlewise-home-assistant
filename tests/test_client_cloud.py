@@ -430,3 +430,44 @@ def test_malformed_v2_discovery_uses_v1_fallback(monkeypatch, state):
     monkeypatch.setattr(cloud, "sign_request", lambda *args, **kwargs: {})
 
     assert client.get_cradle_ip("crib-1") == "192.0.2.10"
+
+
+def test_online_status_does_not_mistake_an_offline_crib_for_a_healthy_api(monkeypatch):
+    status = {"is_cradle_alive": False, "is_cradle_service_alive": False}
+    session = FakeSession([FakeResponse(200, status)])
+    client = _authenticated(
+        CloudAccountClient(email="user@example.com", password="secret", session=session)
+    )
+    monkeypatch.setattr(cloud, "sign_request", lambda *args, **kwargs: {})
+
+    assert client.get_cradle_online_status("crib-1") == status
+
+
+def test_online_status_checks_service_liveness_not_only_the_crib(monkeypatch):
+    status = {"is_cradle_alive": True, "is_cradle_service_alive": False}
+    session = FakeSession([FakeResponse(200, status)])
+    client = _authenticated(
+        CloudAccountClient(email="user@example.com", password="secret", session=session)
+    )
+    monkeypatch.setattr(cloud, "sign_request", lambda *args, **kwargs: {})
+
+    assert client.get_cradle_online_status("crib-1") == status
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"state_message": '{"state":{"state":1}}'},
+        {"is_cradle_alive": "true", "is_cradle_service_alive": True},
+    ],
+)
+def test_online_status_rejects_successful_but_unusable_responses(monkeypatch, payload):
+    session = FakeSession([FakeResponse(200, payload)])
+    client = _authenticated(
+        CloudAccountClient(email="user@example.com", password="secret", session=session)
+    )
+    monkeypatch.setattr(cloud, "sign_request", lambda *args, **kwargs: {})
+
+    with pytest.raises(cloud.CloudApiError, match="no valid crib status"):
+        client.get_cradle_online_status("crib-1")

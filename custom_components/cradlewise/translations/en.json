@@ -129,16 +129,16 @@
           "cannot_connect_local": "The new certificate was provisioned, but the local crib broker could not be verified. The new registration was removed and the existing configuration was kept.",
           "invalid_auth": "Cradlewise rejected the account credentials",
           "invalid_certificate": "Cradlewise returned a certificate that is not currently valid",
+          "registration_cleanup_failed": "Repair failed and the new registration could not be removed. Your existing configuration was kept. Check the Cradlewise app for an unused device before retrying.",
           "wrong_cradle": "This account does not contain the configured crib"
         },
         "step": {
           "reprovision": {
             "title": "Reprovision Cradlewise certificate",
-            "description": "The stored device certificate is missing, malformed, expired, not valid yet, or nearing expiration. Authenticate to create a replacement without changing the Home Assistant config entry, entity IDs, or device identity. Automatic and cloud-only modes retain the submitted email and password. Local-only mode discards them after repair. Optionally remove the previous cloud registration only after the replacement has been validated.",
+            "description": "The stored device certificate is missing, malformed, expired, not valid yet, or nearing expiration. Authenticate to create a replacement without changing the Home Assistant config entry, entity IDs, or device identity. Automatic and cloud-only modes retain the submitted email and password. Local-only mode discards them after repair. The previous registration is kept intact. After confirming the replacement works, remove the unused old device separately in the Cradlewise app, if desired.",
             "data": {
               "email": "Email",
-              "password": "Password",
-              "remove_old_registration": "Remove the previous cloud device registration after successful repair"
+              "password": "Password"
             }
           }
         }
@@ -152,6 +152,7 @@
           "cannot_connect_local": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::cannot_connect_local%]",
           "invalid_auth": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::invalid_auth%]",
           "invalid_certificate": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::invalid_certificate%]",
+          "registration_cleanup_failed": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::registration_cleanup_failed%]",
           "wrong_cradle": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::wrong_cradle%]"
         },
         "step": {
@@ -160,8 +161,7 @@
             "description": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::description%]",
             "data": {
               "email": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::email%]",
-              "password": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::password%]",
-              "remove_old_registration": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::remove_old_registration%]"
+              "password": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::password%]"
             }
           }
         }
@@ -175,6 +175,7 @@
           "cannot_connect_local": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::cannot_connect_local%]",
           "invalid_auth": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::invalid_auth%]",
           "invalid_certificate": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::invalid_certificate%]",
+          "registration_cleanup_failed": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::registration_cleanup_failed%]",
           "wrong_cradle": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::error::wrong_cradle%]"
         },
         "step": {
@@ -183,8 +184,7 @@
             "description": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::description%]",
             "data": {
               "email": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::email%]",
-              "password": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::password%]",
-              "remove_old_registration": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::remove_old_registration%]"
+              "password": "[%key:component::cradlewise::issues::client_certificate_invalid::fix_flow::step::reprovision::data::password%]"
             }
           }
         }

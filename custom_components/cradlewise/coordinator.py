@@ -70,6 +70,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CLOUD_POLL_CONNECTED_SECONDS = 300
 CLOUD_POLL_DISCONNECTED_SECONDS = 60
+CLOUD_STATUS_POLL_SECONDS = 60
 MQTT_RETRY_SECONDS = 60
 
 
@@ -231,6 +232,7 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._bridge_snapshot: dict[str, Any] | None = None
         self._bridge_command_available = False
         self._last_cloud_poll: float | None = None
+        self._last_cloud_status_poll: float | None = None
         self._last_start_attempt: dict[str, float] = {}
         self._bearer_token = config.get(CONF_BEARER_TOKEN)
         self._state_url = build_state_url(bridge_url) if uses_bridge_state else None
@@ -251,10 +253,13 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Return whether one unambiguous command provider is connected."""
         return bool(
             self._bridge_command_available
+            and self._state.command_available("local")
             or self._local_client is not None
             and self._local_client.connected
+            and self._state.command_available("local")
             or self._cloud_client is not None
             and self._cloud_client.connected
+            and self._state.command_available("cloud")
         )
 
     async def async_start(self) -> None:
@@ -405,6 +410,26 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._mark_bridge_unavailable()
                 errors.append(f"media companion: {exc}")
 
+        if self._cloud_account is not None and (
+            self._last_cloud_status_poll is None
+            or time.monotonic() - self._last_cloud_status_poll
+            >= CLOUD_STATUS_POLL_SECONDS
+        ):
+            self._last_cloud_status_poll = time.monotonic()
+            try:
+                status = await self.hass.async_add_executor_job(
+                    self._cloud_account.get_cradle_online_status,
+                    self._cradle_id,
+                )
+                self._state.update_cradle_state(status, "cloud")
+            except CloudAuthenticationError as exc:
+                self._entry.async_start_reauth(self.hass)
+                self._state.mark_error("cloud", str(exc))
+                errors.append(f"cloud online status: {exc}")
+            except CloudApiError as exc:
+                self._state.mark_error("cloud", str(exc))
+                errors.append(f"cloud online status: {exc}")
+
         if self._cloud_account is not None and self._cloud_poll_due():
             self._last_cloud_poll = time.monotonic()
             try:
@@ -436,7 +461,11 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_send_command(self, command: str, value: Any) -> None:
         """Validate and send a command through exactly one provider."""
-        if self._bridge_command_available and self._command_url is not None:
+        if (
+            self._bridge_command_available
+            and self._state.command_available("local")
+            and self._command_url is not None
+        ):
             try:
                 build_desired(command, value)
             except CommandError as exc:
@@ -445,12 +474,22 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         client: LocalCradleClient | None = None
-        if self._local_client is not None and self._local_client.connected:
+        if (
+            self._local_client is not None
+            and self._local_client.connected
+            and self._state.command_available("local")
+        ):
             client = self._local_client
-        elif self._cloud_client is not None and self._cloud_client.connected:
+        elif (
+            self._cloud_client is not None
+            and self._cloud_client.connected
+            and self._state.command_available("cloud")
+        ):
             client = self._cloud_client
         if client is None:
-            raise HomeAssistantError("No Cradlewise command provider is connected")
+            raise HomeAssistantError(
+                "No connected Cradlewise command provider has an active crib"
+            )
 
         self._command_handler.set_publisher(client.publish_shadow)
         try:
@@ -487,10 +526,7 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if update.kind == "device_state":
             self._state.update_device_state(update.payload, source)
         elif update.kind == "cradle_state":
-            if source == "local":
-                self._state.update_cradle_state(update.payload)
-            else:
-                self._state.update_device_state(update.payload, source)
+            self._state.update_cradle_state(update.payload, source)
         elif update.kind == "beacon":
             self._state.update_device_state(update.payload, source)
         self.async_set_updated_data(self._snapshot())
@@ -506,6 +542,12 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._state.set_connected("local", mqtt_connected)
         device_state = bridge.get("device_state")
         if isinstance(device_state, dict):
+            # Accept pre-canonical companion releases without changing entity IDs.
+            device_state = dict(device_state)
+            if "adaptive_soothing_enabled" not in device_state:
+                device_state["adaptive_soothing_enabled"] = device_state.get(
+                    "control_adaptive_soothing_enabled"
+                )
             updated_at = device_state.get("updated_at")
             source = "cloud" if device_state.get("source") == "cloud" else "local"
             self._state.update_normalized_device_state(
@@ -531,7 +573,9 @@ class CradlewiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if isinstance(cradle_state, dict):
             updated_at = cradle_state.get("updated_at")
             self._state.update_cradle_state(
-                cradle_state,
+                cradle_state["raw"]
+                if isinstance(cradle_state.get("raw"), dict)
+                else cradle_state,
                 updated_at=(
                     float(updated_at) if isinstance(updated_at, int | float) else None
                 ),

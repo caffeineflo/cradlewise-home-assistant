@@ -74,6 +74,45 @@ def test_stream_session_filter_matches_app_compatibility_rules():
     assert not streamer._session_matches({})
 
 
+@pytest.mark.parametrize("session_id", [[], {}, 1, True, None])
+def test_stream_session_filter_rejects_non_string_values(session_id):
+    streamer = object.__new__(CribStreamer)
+    streamer.session_id = "active-session"
+
+    assert not streamer._session_matches({"streamInfo": {"sessionId": session_id}})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sdp", [None, [], "invalid", 1])
+async def test_optional_invalid_sdp_does_not_block_ice_message(sdp):
+    streamer = object.__new__(CribStreamer)
+    streamer.session_id = "active-session"
+    streamer._pc = None
+    streamer._queue = asyncio.Queue()
+    handled = asyncio.Event()
+
+    async def handle_ice(_message):
+        handled.set()
+
+    streamer._handle_ice = handle_ice
+    streamer._queue.put_nowait(
+        json.dumps(
+            {
+                "streamInfo": {"sessionId": "active-session"},
+                "sdp": sdp,
+                "ice": {"candidate": "synthetic-candidate"},
+            }
+        )
+    )
+    task = asyncio.create_task(streamer._process_messages())
+    try:
+        await asyncio.wait_for(handled.wait(), timeout=1)
+        assert not task.done()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 def test_shadow_get_is_published_only_after_subscription_acknowledgement():
     streamer = object.__new__(BridgeStreamer)
     streamer._shutting_down = False

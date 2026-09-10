@@ -48,7 +48,9 @@ Then configure any Prometheus-compatible scraper to request `/metrics` with the
 bridge bearer token. The endpoint is pull-only and has no labels. It contains
 only operational values such as health, uptime, reconnects, connection state,
 frame counters, media freshness, sink drops, state freshness, process threads,
-and container PID usage. Alert on container PID usage before it reaches the
+open file descriptors (`cradlewise_bridge_process_open_fds`), and container
+PID usage. Watch for descriptors increasing across reconnects; stable thread
+counts alone do not prove resources are released. Alert on PID usage before it reaches the
 deployment's configured limit so a leaked runtime can't exhaust the container.
 
 The endpoint never exposes cradle IDs, crib or bridge addresses, account data,
