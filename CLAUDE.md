@@ -2,7 +2,10 @@
 
 ## What This Is
 
-Reverse engineering and local integration tools for the Cradlewise smart crib. We decompile the Android app to understand protocols, then build Python scripts that replicate the app's local streaming functionality without depending on Cradlewise cloud services.
+Local-first Home Assistant integration and optional media companion for the
+Cradlewise smart crib. Automatic mode prefers local state and controls with
+cloud fallback; local-only and cloud-only modes are supported. The shared
+client owns the protocol. Authorized Android app analysis informs that client.
 
 ## Project Structure
 
@@ -12,6 +15,10 @@ Reverse engineering and local integration tools for the Cradlewise smart crib. W
 +-- CLAUDE.md                 # This file -- instructions for Claude
 +-- fetch_certs.py            # Downloads device certs from Cradlewise backend
 +-- stream_local.py           # Local video streamer (WebRTC over MQTT)
++-- packages/cradlewise-client/ # Shared state, MQTT, commands, cloud and TLS
++-- custom_components/cradlewise/ # HA config flow, entities and repairs
++-- cradlewise_local/         # Optional media companion and HTTP API
++-- tests/                    # Shared-client, companion and HA runtime tests
 +-- docs/
 |   +-- api/
 |   |   +-- rest-endpoints.md   # REST API endpoints (diffable)
@@ -67,7 +74,7 @@ When a new Cradlewise app version is released:
 - **Crib software:** AWS Greengrass with Janus WebRTC gateway
 - **Local MQTT:** `ssl://<crib_ip>:8883`, mutual TLS, no username/password
 - **Video:** 1280x720 H264 Baseline @ ~10fps over DTLS-SRTP
-- **Audio:** OPUS 48kHz mono (mic, max capture rate 8kHz) -- received but not yet consumed
+- **Audio:** OPUS input, transcoded to AAC mono for the companion's RTSP stream
 
 ## Analysis Approach
 
@@ -142,14 +149,25 @@ crib is on a different subnet, use `--ip` to specify the crib's IP directly.
 
 ## Home Assistant Integration
 
-This repo now includes a Home Assistant custom component. Key considerations:
+HA config flow provisions certificates and selects Automatic, Local-only, or
+Cloud-only mode. State and controls work without the companion. When configured,
+the companion owns local MQTT and HA uses its HTTP API; do not start a competing
+local client with the same device UUID. The camera uses companion RTSP/RTSPS.
 
-- HA uses the bridge RTSP stream for the camera and the bridge HTTP API for
-  state/commands.
-- The MQTT connection could integrate with HA's MQTT support, but the mutual TLS with device-specific certs is non-standard
-- Cert provisioning (fetch_certs.py) would need to become a config flow
-- Packaged add-on/config-flow certificate provisioning remains future work.
-- Sleep analytics entities remain future work.
+The shared client owns normalized fields, shadow merge semantics, commands,
+authentication, and broker-chain validation. Keep companion legacy fields as
+compatibility aliases. Crib operational status is separate from cloud MQTT
+connectivity; an AWS connection alone does not mean the crib is online.
+
+Initial broker CA pinning is trust-on-first-use on a trusted network, not a
+vendor-rooted identity check. Shape/signature/SAN checks do not authenticate an
+untrusted first-contact peer. Never replace an existing pin automatically.
+
+Certificate repair preserves HA identity and keeps the old cloud registration.
+Optional old-device cleanup happens separately after verifying the replacement.
+Packaged HA app deployment and HA sleep analytics remain future work. Wake
+recording uses native HA with short, best-effort pre-roll, not a guaranteed
+two-minute buffer. Keep media, metrics and error reporting optional.
 
 ## Tools Required
 

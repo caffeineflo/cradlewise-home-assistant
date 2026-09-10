@@ -15,6 +15,9 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from cradlewise_client.state import cradle_is_active, normalize_device_state
+from cradlewise_client.state import merge_state as _merge_state
+
 from .commands import CommandError, CommandUnavailable
 from .observability import (
     BRIDGE_API_VERSION,
@@ -24,15 +27,6 @@ from .observability import (
 
 log = logging.getLogger(__name__)
 
-SLEEP_PHASE_MAP = {
-    0: "away",
-    1: "awake",
-    2: "stirring",
-    3: "stirring",
-    4: "sleep",
-    5: "awake",
-    6: "stirring",
-}
 
 SLEEP_EVENT_MAP = {
     0: "away",
@@ -43,13 +37,6 @@ SLEEP_EVENT_MAP = {
     5: "sleep",
 }
 
-SLEEP_STATE_MAP = {
-    0: "Baby not present",
-    2: "Active Awake",
-    3: "Quite Awake",
-    4: "Light sleep",
-    5: "Deep sleep",
-}
 
 SOUND_AMBIENCE_MAP = {
     0: "light rain",
@@ -279,21 +266,6 @@ def _device_state_payload(payload: dict[str, Any] | None) -> dict[str, Any] | No
     return None
 
 
-def _merge_state(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    """Apply AWS shadow-style partial state without mutating either input."""
-    merged = copy.deepcopy(base)
-    for key, value in patch.items():
-        if value is None:
-            merged.pop(key, None)
-        elif isinstance(value, dict):
-            current = merged.get(key)
-            nested_base = current if isinstance(current, dict) else {}
-            merged[key] = _merge_state(nested_base, value)
-        else:
-            merged[key] = copy.deepcopy(value)
-    return merged
-
-
 def _sleep_phase_raw(payload: dict[str, Any] | None) -> int | None:
     phase_v2 = _first_value(
         payload,
@@ -307,60 +279,11 @@ def _sleep_phase_raw(payload: dict[str, Any] | None) -> int | None:
     )
 
 
-def _sleep_phase_name(payload: dict[str, Any] | None) -> str | None:
-    raw = _sleep_phase_raw(payload)
-    if raw is not None:
-        return SLEEP_PHASE_MAP.get(raw, f"unknown ({raw})")
-    value = _nested(payload, "babySleepPhase")
-    return str(value) if value is not None else None
-
-
 def _sleep_event_name(payload: dict[str, Any] | None) -> str | None:
     raw = _sleep_phase_raw(payload)
     if raw is not None:
         return SLEEP_EVENT_MAP.get(raw, f"unknown ({raw})")
     return None
-
-
-def _sleep_state_name(payload: dict[str, Any] | None) -> str | None:
-    value = _first_value(
-        payload,
-        ("babySleepState",),
-        ("baby_sleep_state",),
-        ("rawShadow", "babySleepState"),
-    )
-    raw = _int_or_none(value)
-    if raw is not None:
-        return SLEEP_STATE_MAP.get(raw, f"unknown ({raw})")
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip()
-    return normalized or None
-
-
-def _ambient_temperature_c(payload: dict[str, Any] | None) -> float | None:
-    value = _float_or_none(
-        _first_value(
-            payload,
-            ("ambientTempInCelsius",),
-            ("rawShadow", "ambientTempInCelsius"),
-        )
-    )
-    if value is not None:
-        return value
-
-    value = _float_or_none(
-        _first_value(
-            payload,
-            ("deviceStatus", "ambientTemp"),
-            ("rawShadow", "deviceStatus", "ambientTemp"),
-        )
-    )
-    if value is None:
-        return None
-    if abs(value) > 200:
-        return value / 1000
-    return value
 
 
 def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -382,13 +305,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
     )
     snapshot = {
         "raw": state,
-        "baby_present": _first_value(
-            state,
-            ("babyPresent",),
-            ("baby_present",),
-            ("rawShadow", "babyPresent"),
-        ),
-        "sleep_state": _sleep_state_name(state),
         "sleep_state_raw": _int_or_none(
             _first_value(state, ("rawShadow", "babySleepState"), ("babySleepState",))
         ),
@@ -404,7 +320,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("babySleepStateBeingDetermined",),
             ("rawShadow", "babySleepStateBeingDetermined"),
         ),
-        "sleep_phase": _sleep_phase_name(state),
         "sleep_phase_raw": _sleep_phase_raw(state),
         "sleep_event": _sleep_event_name(state),
         "sleep_phase_event_start_time": _first_value(
@@ -427,30 +342,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("babyPresenceBeingDetermined",),
             ("rawShadow", "babyPresenceBeingDetermined"),
         ),
-        "baby_needs_attention": _first_value_or_default(
-            state,
-            inactive_default,
-            ("babyNeedsAttention",),
-            ("rawShadow", "babyNeedsAttention"),
-        ),
-        "baby_needs_help": _first_value_or_default(
-            state,
-            inactive_default,
-            ("babyNeedsHelp",),
-            ("rawShadow", "babyNeedsHelp"),
-        ),
-        "crib_helping": _first_value_or_default(
-            state,
-            inactive_default,
-            ("isCribHelping",),
-            ("rawShadow", "isCribHelping"),
-        ),
-        "loud_sound_detected": _first_value_or_default(
-            state,
-            inactive_default,
-            ("loudSoundDetected",),
-            ("rawShadow", "loudSoundDetected"),
-        ),
         "inside_sleep_schedule": _first_value_or_default(
             state,
             inactive_default,
@@ -462,12 +353,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             inactive_default,
             ("insideSoothingWindow",),
             ("rawShadow", "insideSoothingWindow"),
-        ),
-        "rocking_not_effective": _first_value_or_default(
-            state,
-            inactive_default,
-            ("rockingNotEffective",),
-            ("rawShadow", "rockingNotEffective"),
         ),
         "reported_state": _int_or_none(
             _first_value(state, ("state",), ("rawShadow", "state"))
@@ -541,9 +426,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
         "is_calibration_done": _first_value(
             state, ("isCalibrationDone",), ("rawShadow", "isCalibrationDone")
         ),
-        "obstruction_detected": _first_value(
-            state, ("obstructionToFDetected",), ("rawShadow", "obstructionToFDetected")
-        ),
         "user_action_for_obstruction": _first_value(
             state,
             ("userActionForObstruction",),
@@ -569,9 +451,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             state,
             ("hasBabyEverBeenPlaced",),
             ("rawShadow", "hasBabyEverBeenPlaced"),
-        ),
-        "bounce_mode": _first_value(
-            state, ("bounceMode",), ("rawShadow", "bounceMode")
         ),
         "bounce_setting": _first_value(
             state,
@@ -599,25 +478,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
                 state,
                 ("actuator", "bounceAlwaysOnIntensity"),
                 ("rawShadow", "actuator", "bounceAlwaysOnIntensity"),
-            )
-        ),
-        "bounce_duration": _int_or_none(
-            _first_value(
-                state, ("actuator", "duration"), ("rawShadow", "actuator", "duration")
-            )
-        ),
-        "bounce_duration_limit": _int_or_none(
-            _first_value(
-                state,
-                ("actuator", "durationLimit"),
-                ("rawShadow", "actuator", "durationLimit"),
-            )
-        ),
-        "bounce_time_remaining": _int_or_none(
-            _first_value(
-                state,
-                ("actuator", "timeRemaining"),
-                ("rawShadow", "actuator", "timeRemaining"),
             )
         ),
         "bounce_tap_detection_enabled": _first_value(
@@ -654,48 +514,11 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
                 ("rawShadow", "actuator", "accFramePeaksThreshold"),
             )
         ),
-        "bounce_amplitude": _int_or_none(
-            _first_value(
-                state, ("actuator", "amplitude"), ("rawShadow", "actuator", "amplitude")
-            )
-        ),
-        "bounce_level": _int_or_none(
-            _first_value(state, ("bounceLevel",), ("rawShadow", "bounceLevel"))
-        ),
-        "bouncing": _first_value(
-            state, ("actuator", "on"), ("rawShadow", "actuator", "on")
-        ),
         "responsivity_setting": _first_value(
             state,
             ("responsivitySetting",),
             ("responsivity_setting",),
             ("rawShadow", "responsivitySetting"),
-        ),
-        "music_mode": _first_value(state, ("musicMode",), ("rawShadow", "musicMode")),
-        "music_playing": _first_value(
-            state,
-            ("music", "play"),
-            ("soundSynth", "play"),
-            ("rawShadow", "soundSynth", "play"),
-            ("rawShadow", "lullabies", "enableMusic"),
-        ),
-        "music_volume": _int_or_none(
-            _first_value(
-                state,
-                ("music", "volume"),
-                ("soundSynth", "volume"),
-                ("rawShadow", "soundSynth", "volume"),
-                ("rawShadow", "lullabies", "volume"),
-            )
-        ),
-        "music_level": _int_or_none(
-            _first_value(state, ("musicLevel",), ("rawShadow", "musicLevel"))
-        ),
-        "music_mood": _first_value(
-            state,
-            ("music", "mood"),
-            ("soundSynth", "trackName"),
-            ("rawShadow", "soundSynth", "trackName"),
         ),
         "volume_profile": _first_value_or_default(
             state,
@@ -711,37 +534,11 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             ),
             SOUND_AMBIENCE_MAP,
         ),
-        "sound_ambience_raw": _int_or_none(
-            _first_value(
-                state,
-                ("soundSynth", "ambience"),
-                ("rawShadow", "soundSynth", "ambience"),
-            )
-        ),
         "sound_color": _mapped_int_name(
             _first_value(
                 state, ("soundSynth", "color"), ("rawShadow", "soundSynth", "color")
             ),
             SOUND_COLOR_MAP,
-        ),
-        "sound_color_raw": _int_or_none(
-            _first_value(
-                state, ("soundSynth", "color"), ("rawShadow", "soundSynth", "color")
-            )
-        ),
-        "sound_heartbeat_volume": _int_or_none(
-            _first_value(
-                state,
-                ("soundSynth", "heartbeatVolume"),
-                ("rawShadow", "soundSynth", "heartbeatVolume"),
-            )
-        ),
-        "sound_breath_volume": _int_or_none(
-            _first_value(
-                state,
-                ("soundSynth", "breathVolume"),
-                ("rawShadow", "soundSynth", "breathVolume"),
-            )
         ),
         "sound_spotify_service_enabled": _first_value(
             state,
@@ -796,17 +593,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
                 state, ("lullabies", "volume"), ("rawShadow", "lullabies", "volume")
             )
         ),
-        "music_duration": _int_or_none(
-            _first_value(state, ("musicDuration",), ("rawShadow", "musicDuration"))
-        ),
-        "music_time_remaining": _int_or_none(
-            _first_value(
-                state, ("musicTimeRemaining",), ("rawShadow", "musicTimeRemaining")
-            )
-        ),
-        "light_on": _first_value(
-            state, ("light", "lightOn"), ("rawShadow", "light", "lightOn")
-        ),
         "light_intensity": light_intensity,
         "light_indicator_brightness": light_indicator_brightness,
         "light_indicator_brightness_mode": _first_value(
@@ -831,7 +617,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("deviceStatus", "supplyRemoved"),
             ("rawShadow", "deviceStatus", "supplyRemoved"),
         ),
-        "ambient_temperature": _ambient_temperature_c(state),
         "device_uptime_service": _float_or_none(
             _first_value(
                 state,
@@ -897,11 +682,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
         "wifi_stats_beacon_loss_count": _int_or_none(
             _wifi_stat_first(state, ("BeaconLossCount",), ("beaconLossCount",))
         ),
-        "software_version": _first_value(
-            state,
-            ("meta", "software_version"),
-            ("rawShadow", "meta", "software_version"),
-        ),
         "rootfs_version": _first_value(
             state, ("meta", "rootfs_version"), ("rawShadow", "meta", "rootfs_version")
         ),
@@ -946,11 +726,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
         "update_first": _first_value(
             state, ("update", "first"), ("rawShadow", "update", "first")
         ),
-        "control_adaptive_soothing_enabled": _first_value(
-            state,
-            ("control", "adaptiveSoothingEnabled"),
-            ("rawShadow", "control", "adaptiveSoothingEnabled"),
-        ),
         "control_bna_alert_control": _int_or_none(
             _first_value(
                 state,
@@ -982,13 +757,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
                 ("rawShadow", "control", "videoServiceBitMask"),
             )
         ),
-        "breath_rate": _int_or_none(
-            _first_value(
-                state,
-                ("babyMonitor", "breath", "rate"),
-                ("rawShadow", "babyMonitor", "breath", "rate"),
-            )
-        ),
         "breath_final_rate": _int_or_none(
             _first_value(
                 state,
@@ -1014,11 +782,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             state,
             ("babyMonitor", "breathTrigger"),
             ("rawShadow", "babyMonitor", "breathTrigger"),
-        ),
-        "lower_breath_rate_alert": _first_value(
-            state,
-            ("babyMonitor", "lowerBreathRateAlert"),
-            ("rawShadow", "babyMonitor", "lowerBreathRateAlert"),
         ),
         "keep_bounce_on_during_sleep": _first_value(
             state,
@@ -1092,12 +855,6 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("appSettings", "flipVideo"),
             ("rawShadow", "appSettings", "flipVideo"),
         ),
-        "max_bounce_limit": _int_or_none(
-            _first_value(state, ("maxBounceLimit",), ("rawShadow", "maxBounceLimit"))
-        ),
-        "max_volume_limit": _int_or_none(
-            _first_value(state, ("maxVolumeLimit",), ("rawShadow", "maxVolumeLimit"))
-        ),
         "max_sound_preview": _first_value(
             state, ("maxSoundPreview",), ("rawShadow", "maxSoundPreview")
         ),
@@ -1148,10 +905,7 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
     boolean_fields = {
         "app_flip_video",
         "auto_mode_lock_on",
-        "baby_needs_attention",
-        "baby_needs_help",
         "baby_presence_being_determined",
-        "baby_present",
         "baby_present_previous",
         "bounce_always_on",
         "bounce_disabled",
@@ -1159,12 +913,9 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
         "bounce_quiescent",
         "bounce_super_gentle",
         "bounce_tap_detection_enabled",
-        "bouncing",
         "breath_trigger",
         "charging",
-        "control_adaptive_soothing_enabled",
         "control_breath_enabled",
-        "crib_helping",
         "enable_acc_movement_detection",
         "enable_coeff_sensor_update",
         "has_baby_ever_been_placed",
@@ -1175,17 +926,11 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
         "keep_bounce_on_during_sleep_is_on",
         "keep_music_on_during_sleep",
         "keep_music_on_during_sleep_is_on",
-        "light_on",
-        "loud_sound_detected",
-        "lower_breath_rate_alert",
         "lullabies_enabled",
         "lullabies_timer_on",
         "max_sound_preview",
-        "music_playing",
-        "obstruction_detected",
         "power_supply_removed",
         "restart_ggc_requested",
-        "rocking_not_effective",
         "significant_change_in_weight_enabled",
         "sleep_state_being_determined",
         "sound_spotify_service_enabled",
@@ -1198,8 +943,12 @@ def _device_state_snapshot(payload: dict[str, Any] | None) -> dict[str, Any]:
     }
     for field_name in boolean_fields:
         snapshot[field_name] = _bool_or_none(snapshot[field_name])
-    if snapshot["light_on"] is None and light_intensity is not None:
-        snapshot["light_on"] = light_intensity > 0
+    snapshot.update(
+        normalize_device_state({"reported": state} if state is not None else None)
+    )
+    snapshot["control_adaptive_soothing_enabled"] = snapshot[
+        "adaptive_soothing_enabled"
+    ]
     return snapshot
 
 
@@ -1241,6 +990,8 @@ class BridgeStatusStore:
     _device_states: dict[str, dict[str, Any]] = field(default_factory=dict)
     _device_state_updated_at: dict[str, float] = field(default_factory=dict)
     _device_state_errors: dict[str, str | None] = field(default_factory=dict)
+    _operational: dict[str, bool] = field(default_factory=dict)
+    _status_updated_at: dict[str, float] = field(default_factory=dict)
     _sleep_analytics: dict[str, Any] | None = None
     _sleep_analytics_updated_at: float | None = None
     _sleep_analytics_error: str | None = None
@@ -1359,8 +1110,16 @@ class BridgeStatusStore:
             self._audio_frames += 1
             self._last_audio_frame_at = _now()
 
-    def update_cradle_state(self, payload: dict[str, Any]) -> None:
+    def update_cradle_state(
+        self, payload: dict[str, Any], source: str = "local"
+    ) -> None:
         with self._lock:
+            active = cradle_is_active(payload)
+            if active is not None:
+                self._operational[source] = active
+                self._status_updated_at[source] = _now()
+            if source == "cloud":
+                return
             self._cradle_state = copy.deepcopy(payload)
             self._last_cradle_state_at = _now()
             state = _device_state_payload(payload)
@@ -1401,6 +1160,12 @@ class BridgeStatusStore:
             self._sleep_analytics_error = error
 
     def _source_stale_locked(self, source: str, now: float) -> bool:
+        provider = "cloud" if source == "cloud" else "local"
+        if self._operational.get(provider) is False:
+            return True
+        if provider == "cloud" and self._operational.get(provider) is True:
+            if now - self._status_updated_at[provider] > self.cloud_state_stale_after:
+                return True
         updated_at = self._device_state_updated_at.get(source)
         if updated_at is None:
             return True
@@ -1610,6 +1375,34 @@ class BridgeStatusStore:
 
 
 CommandHandler = Callable[[dict[str, Any]], dict[str, Any]]
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """Limit accepted connections before allocating any handler threads."""
+
+    max_connections = 16
+    daemon_threads = True
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._slots = threading.BoundedSemaphore(self.max_connections)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self._slots.acquire(blocking=False):
+            # Close overflow immediately; writing a response can itself block.
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 class BridgeStatusHttpServer:
@@ -1833,8 +1626,7 @@ class BridgeStatusHttpServer:
             def log_message(self, format: str, *args: object) -> None:
                 return None
 
-        self._httpd = ThreadingHTTPServer((self.host, self.port), Handler)
-        self._httpd.daemon_threads = True
+        self._httpd = BoundedThreadingHTTPServer((self.host, self.port), Handler)
         self._thread = threading.Thread(
             target=self._httpd.serve_forever,
             name="cradlewise-status-http",

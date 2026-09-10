@@ -19,7 +19,7 @@ def test_wake_recording_targets_live_camera_entity():
     assert "entity_id: camera.your_crib_camera" in automation
 
 
-def test_wake_recording_preserves_two_minute_pre_and_post_windows():
+def test_wake_recording_requests_bounded_lookback_and_two_minutes_forward():
     automation = AUTOMATIONS_PATH.read_text()
 
     assert "duration: 120\n        lookback: 120" in automation

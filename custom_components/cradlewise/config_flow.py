@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import tempfile
 from pathlib import Path
@@ -69,6 +70,7 @@ from .coordinator import (
     BridgeVersionError,
     async_fetch_bridge_info,
 )
+from .provisioning import async_registration_job
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -491,12 +493,18 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(account.cradle_id)
         self._abort_if_unique_id_configured()
         try:
-            credentials = await self.hass.async_add_executor_job(
-                self._provision_account,
-                self._cloud,
-                account,
-                self.hass.config.time_zone,
-                self.hass.config.country or "US",
+            credentials = await async_registration_job(
+                self.hass,
+                self.hass.async_add_executor_job(
+                    self._provision_account,
+                    self._cloud,
+                    account,
+                    self.hass.config.time_zone,
+                    self.hass.config.country or "US",
+                ),
+                lambda credentials: self._remove_new_registration(
+                    account, credentials.device_id
+                ),
             )
         except CloudAuthenticationError:
             return self.async_abort(reason="invalid_auth")
@@ -505,6 +513,29 @@ class CradlewiseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except OSError:
             return self.async_abort(reason="cannot_connect")
 
+        try:
+            return await self._async_finish_account_entry(account, credentials)
+        except (asyncio.CancelledError, Exception):
+            # The credential job has completed, but discovery/pinning may still
+            # be running. Roll back the new registration before propagating.
+            await async_registration_job(
+                self.hass,
+                self.hass.async_add_executor_job(
+                    self._remove_new_registration, account, credentials.device_id
+                ),
+                lambda _result: None,
+            )
+            raise
+
+    def _remove_new_registration(self, account: CradleAccount, device_id: str) -> None:
+        assert self._cloud is not None
+        if self._cloud.remove_user_devices(account, [device_id]) != [device_id]:
+            raise CloudApiError("Cradlewise did not confirm new registration removal")
+
+    async def _async_finish_account_entry(
+        self, account: CradleAccount, credentials: ProvisionedCredentials
+    ) -> ConfigFlowResult:
+        assert self._cloud is not None
         local_host = None
         server_ca = None
         if self._mode != CONNECTION_MODE_CLOUD:

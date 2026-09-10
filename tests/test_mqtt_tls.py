@@ -1,9 +1,11 @@
 import asyncio
 import threading
+import weakref
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import paho.mqtt.client as paho
 import pytest
 
 import stream_local
@@ -403,3 +405,55 @@ async def test_repeated_runs_do_not_retain_mqtt_loop_threads(
         await streamer.run()
 
     assert all(not client.thread.is_alive() for client in clients)
+
+
+@pytest.mark.enable_socket
+@pytest.mark.asyncio
+async def test_failed_runs_release_real_paho_clients_despite_retained_tracebacks(
+    tmp_path: Path, monkeypatch
+):
+    (tmp_path / "device_id").write_text("device-1")
+    clients = []
+    errors = []
+    socketpairs = []
+
+    class LoopClient(paho.Client):
+        def __init__(self):
+            super().__init__(paho.CallbackAPIVersion.VERSION2)
+            self.stopped = threading.Event()
+
+        def connect(self, *args, **kwargs):
+            return 0
+
+        def loop_forever(self, *args, **kwargs):
+            self.stopped.wait(5)
+
+        def loop_start(self):
+            result = super().loop_start()
+            socketpairs.extend((self._sockpairR, self._sockpairW))
+            return result
+
+        def disconnect(self, *args, **kwargs):
+            self.stopped.set()
+            return super().disconnect(*args, **kwargs)
+
+    def setup(streamer):
+        client = LoopClient()
+        client.on_message = streamer._on_message
+        streamer._mqtt = client
+        clients.append(weakref.ref(client))
+
+    async def fail_messages():
+        raise RuntimeError("MQTT signaling publish failed with rc=4")
+
+    monkeypatch.setattr(CribStreamer, "_setup_mqtt", setup)
+    for _ in range(25):
+        streamer = CribStreamer("192.0.2.10", "cradle-1", tmp_path)
+        streamer._process_messages = fail_messages
+        try:
+            await streamer.run()
+        except RuntimeError as error:
+            errors.append(error)
+
+    assert all(client() is None for client in clients)
+    assert len(socketpairs) == 50 and all(sock.fileno() == -1 for sock in socketpairs)

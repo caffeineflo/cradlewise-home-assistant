@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 import traceback
 from types import SimpleNamespace
 from typing import Any
@@ -47,6 +48,7 @@ pytestmark = [
 
 CRADLE_ID = "00000000-0000-4000-8000-000000000001"
 BRIDGE_URL = "http://bridge.test:8088"
+ACTIVE_CRADLE = {"is_cradle_alive": True, "is_cradle_service_alive": True}
 
 
 class FakeClient:
@@ -84,9 +86,13 @@ async def test_command_prefers_local_and_falls_back_to_cloud(
     cloud = FakeClient(connected=True)
     coordinator._local_client = local
     coordinator._cloud_client = cloud
+    coordinator._state.set_connected("local", True)
+    coordinator._state.set_connected("cloud", True)
+    coordinator._state.update_cradle_state(ACTIVE_CRADLE, "cloud")
 
     await coordinator.async_send_command("actuator_on", True)
     local.connected = False
+    coordinator._state.set_connected("local", False)
     await coordinator.async_send_command("actuator_on", False)
 
     assert local.published == [{"state": {"desired": {"actuator": {"on": True}}}}]
@@ -152,6 +158,7 @@ async def test_media_companion_is_the_only_local_command_publisher(
     cloud = FakeClient(connected=True)
     coordinator._cloud_client = cloud
     coordinator._bridge_command_available = True
+    coordinator._state.set_connected("local", True)
     aioclient_mock.post(f"{BRIDGE_URL}/command", text="ok")
     coordinator.async_request_refresh = AsyncMock()
 
@@ -174,6 +181,7 @@ async def test_bridge_command_errors_do_not_expose_response_bodies(
         hass, _entry(**{CONF_BRIDGE_STATUS_URL: BRIDGE_URL})
     )
     coordinator._bridge_command_available = True
+    coordinator._state.set_connected("local", True)
     aioclient_mock.post(
         f"{BRIDGE_URL}/command",
         status=status,
@@ -207,6 +215,7 @@ async def test_bridge_command_transport_errors_do_not_expose_exception_text(
         hass, _entry(**{CONF_BRIDGE_STATUS_URL: BRIDGE_URL})
     )
     coordinator._bridge_command_available = True
+    coordinator._state.set_connected("local", True)
     aioclient_mock.post(f"{BRIDGE_URL}/command", exc=error)
 
     with pytest.raises(HomeAssistantError, match="Media companion command") as raised:
@@ -289,9 +298,10 @@ async def test_cloud_auth_failure_starts_reauth_without_hiding_local_state(
     entry.add_to_hass(hass)
     coordinator = CradlewiseCoordinator(hass, entry)
     coordinator._cloud_account = SimpleNamespace(
+        get_cradle_online_status=Mock(return_value=ACTIVE_CRADLE),
         get_cradle_state=Mock(
             side_effect=CloudAuthenticationError("credentials rejected")
-        )
+        ),
     )
     coordinator._state.set_connected("local", True)
     coordinator._state.update_device_state(
@@ -324,9 +334,10 @@ async def test_cloud_only_auth_failure_is_unavailable_and_starts_reauth(
     entry.add_to_hass(hass)
     coordinator = CradlewiseCoordinator(hass, entry)
     coordinator._cloud_account = SimpleNamespace(
+        get_cradle_online_status=Mock(return_value=ACTIVE_CRADLE),
         get_cradle_state=Mock(
             side_effect=CloudAuthenticationError("credentials rejected")
-        )
+        ),
     )
 
     with pytest.raises(UpdateFailed, match="credentials rejected"):
@@ -440,5 +451,66 @@ async def test_command_availability_accepts_any_single_healthy_provider(
     coordinator = CradlewiseCoordinator(hass, _entry())
     coordinator._local_client = SimpleNamespace(connected=False)
     coordinator._cloud_client = SimpleNamespace(connected=True)
+    coordinator._state.set_connected("cloud", True)
+    coordinator._state.update_cradle_state(ACTIVE_CRADLE, "cloud")
 
     assert coordinator.command_available is True
+
+
+@pytest.mark.parametrize("status", [None, {"is_cradle_alive": False}])
+async def test_cloud_commands_require_positive_crib_liveness(
+    hass: HomeAssistant, status: dict | None
+) -> None:
+    coordinator = CradlewiseCoordinator(hass, _entry())
+    cloud = FakeClient(connected=True)
+    coordinator._cloud_client = cloud
+    coordinator._state.set_connected("cloud", True)
+    if status is not None:
+        coordinator._state.update_cradle_state(status, "cloud")
+
+    with pytest.raises(HomeAssistantError, match="active crib"):
+        await coordinator.async_send_command("actuator_on", True)
+
+    assert (coordinator.command_available, cloud.published) == (False, [])
+
+
+async def test_liveness_poll_runs_while_shadow_poll_is_not_due(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = CradlewiseCoordinator(hass, _entry())
+    coordinator._cloud_account = SimpleNamespace(
+        get_cradle_online_status=Mock(return_value=ACTIVE_CRADLE),
+        get_cradle_state=Mock(),
+    )
+    coordinator._cloud_client = FakeClient(connected=True)
+    coordinator._state.set_connected("cloud", True)
+    coordinator._state.update_device_state(
+        {"babyPresent": False}, "cloud", updated_at=1
+    )
+    coordinator._last_cloud_poll = time.monotonic()
+    coordinator._last_cloud_status_poll = time.monotonic() - 61
+
+    snapshot = await coordinator._async_update_data()
+
+    assert (
+        snapshot["device_state"]["available"],
+        coordinator.command_available,
+        coordinator._cloud_account.get_cradle_state.call_count,
+    ) == (True, True, 0)
+
+
+async def test_old_companion_adaptive_field_keeps_existing_switch_available(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = CradlewiseCoordinator(hass, _entry())
+    coordinator._ingest_bridge(
+        {
+            "mqtt": {"connected": True},
+            "device_state": {
+                "control_adaptive_soothing_enabled": True,
+                "updated_at": time.time(),
+                "source": "local_shadow",
+            },
+        }
+    )
+    assert coordinator._snapshot()["device_state"]["adaptive_soothing_enabled"] is True

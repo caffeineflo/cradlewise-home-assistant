@@ -1,6 +1,6 @@
 - id: cradlewise_wake_recording
   alias: Cradlewise Wake Recording
-  description: Records wake events with two minutes before and after the trigger.
+  description: Records wake events with available pre-roll and two minutes after the trigger.
   mode: single
   max_exceeded: silent
   triggers:

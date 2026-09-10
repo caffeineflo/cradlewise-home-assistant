@@ -37,14 +37,13 @@ from .const import (
     CONF_CLIENT_CERTIFICATE,
     CONF_CONNECTION_MODE,
     CONF_CRADLE_ID,
-    CONF_DEVICE_ID,
     CONF_LOCAL_HOST,
-    CONF_REMOVE_OLD_REGISTRATION,
     CONF_SERVER_CA_CERTIFICATE,
     CONNECTION_MODE_CLOUD,
     CONNECTION_MODE_LOCAL,
     DOMAIN,
 )
+from .provisioning import async_registration_job
 
 
 def _issue_id(entry: ConfigEntry) -> str:
@@ -141,10 +140,6 @@ def _repair_schema(email: str) -> vol.Schema:
             vol.Optional(CONF_PASSWORD): selector.TextSelector(
                 selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
             ),
-            vol.Optional(
-                CONF_REMOVE_OLD_REGISTRATION,
-                default=False,
-            ): selector.BooleanSelector(),
         }
     )
 
@@ -166,7 +161,7 @@ class ClientCertificateRepairFlow(RepairsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> RepairsFlowResult:
-        """Authenticate and atomically replace the provisioned identity."""
+        """Validate replacement credentials and retain the previous registration."""
         errors: dict[str, str] = {}
         if user_input is not None:
             email = str(user_input.get(CONF_EMAIL, "")).strip()
@@ -177,12 +172,17 @@ class ClientCertificateRepairFlow(RepairsFlow):
                 errors["base"] = "invalid_auth"
             else:
                 try:
-                    credentials, server_ca = await self.hass.async_add_executor_job(
-                        self._reprovision,
-                        email,
-                        password,
-                        bool(user_input.get(CONF_REMOVE_OLD_REGISTRATION, False)),
+                    credentials, server_ca = await async_registration_job(
+                        self.hass,
+                        self.hass.async_add_executor_job(
+                            self._reprovision, email, password
+                        ),
+                        lambda result: self._rollback_cancelled_repair(
+                            email, password, result[0]
+                        ),
                     )
+                except RegistrationCleanupError:
+                    errors["base"] = "registration_cleanup_failed"
                 except CloudAuthenticationError:
                     errors["base"] = "invalid_auth"
                 except WrongCradleError:
@@ -227,7 +227,6 @@ class ClientCertificateRepairFlow(RepairsFlow):
         self,
         email: str,
         password: str,
-        remove_old_registration: bool,
     ) -> tuple[ProvisionedCredentials, str | None]:
         cloud = CloudAccountClient(email=email, password=password)
         cloud.authenticate()
@@ -258,9 +257,7 @@ class ClientCertificateRepairFlow(RepairsFlow):
                     "new client certificate is not currently valid"
                 )
             server_ca = self._pin_local_credentials(credentials)
-            if remove_old_registration:
-                self._remove_old_registration(cloud, account)
-        except (BrokerCertificateError, ClientCertificateError, CloudApiError) as exc:
+        except Exception as exc:
             self._rollback_registration(cloud, account, credentials.device_id, exc)
             raise
         return credentials, server_ca
@@ -276,19 +273,24 @@ class ClientCertificateRepairFlow(RepairsFlow):
             raise BrokerCertificateError("local crib address is missing")
         return _pin_credentials(credentials, host)
 
-    def _remove_old_registration(
+    def _rollback_cancelled_repair(
         self,
-        cloud: CloudAccountClient,
-        account: CradleAccount,
+        email: str,
+        password: str,
+        credentials: ProvisionedCredentials,
     ) -> None:
-        old_device_id = str(self._entry.data[CONF_DEVICE_ID])
-        devices = cloud.list_user_devices(account)
-        if old_device_id not in {device.device_id for device in devices}:
-            return
-        if cloud.remove_user_devices(account, [old_device_id]) != [old_device_id]:
-            raise CloudApiError(
-                "Cradlewise did not confirm the old registration removal"
-            )
+        cloud = CloudAccountClient(email=email, password=password)
+        account = next(
+            account
+            for account in cloud.list_accounts()
+            if account.cradle_id == self._entry.data[CONF_CRADLE_ID]
+        )
+        self._rollback_registration(
+            cloud,
+            account,
+            credentials.device_id,
+            RuntimeError("certificate repair was cancelled"),
+        )
 
     @staticmethod
     def _rollback_registration(
@@ -297,12 +299,22 @@ class ClientCertificateRepairFlow(RepairsFlow):
         device_id: str,
         original_error: Exception,
     ) -> None:
-        removed = cloud.remove_user_devices(account, [device_id])
+        try:
+            removed = cloud.remove_user_devices(account, [device_id])
+        except (CloudApiError, CloudAuthenticationError, OSError) as exc:
+            raise RegistrationCleanupError(
+                "certificate repair failed and its new registration "
+                "could not be removed"
+            ) from exc
         if removed != [device_id]:
-            raise CloudApiError(
+            raise RegistrationCleanupError(
                 "certificate repair failed and its new registration could not be "
                 "removed"
             ) from original_error
+
+
+class RegistrationCleanupError(CloudApiError):
+    """The replacement failed and its cloud registration still needs cleanup."""
 
 
 class WrongCradleError(CloudApiError):

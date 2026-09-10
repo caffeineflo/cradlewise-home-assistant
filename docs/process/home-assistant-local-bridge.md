@@ -234,8 +234,9 @@ Home Assistant raises a Repair when the stored client certificate is missing,
 invalid, expired, not valid yet, or expires within 30 days. Reprovisioning
 keeps the config entry, device identity, unique ID, and entity IDs unchanged.
 If local broker validation fails, the newly created registration is removed
-and the existing configuration is kept. Removing the prior registration after
-a successful repair is an explicit opt-in.
+and the existing configuration is kept. Repair never removes the prior
+registration. Once the replacement works, remove the unused old device
+separately in the Cradlewise app, if desired.
 
 Normal config-entry removal does not call the Cradlewise cloud. The Configure
 menu has a separate destructive action that verifies the stored device ID in
@@ -314,7 +315,8 @@ wrong-status reporting, firmware commands, and system reboot/shutdown.
 The repo includes an optional native Home Assistant `camera.record` automation
 for wake events. Camera preload keeps HA's bounded HLS segment lookback ready,
 and the automation writes clips only to authenticated local media storage. It
-requests 120 seconds before and 120 seconds after the trigger. It uses single
+requests up to 120 seconds of lookback, limited to HA's short segment buffer,
+and approximately 120 seconds after the trigger. It uses single
 mode, so a trigger during an active recording does not create an overlapping
 file; the active clip still covers that later event.
 

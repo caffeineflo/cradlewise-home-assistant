@@ -49,13 +49,15 @@ def test_metrics_contain_only_operational_values() -> None:
 def test_metrics_expose_local_pid_pressure(monkeypatch) -> None:
     monkeypatch.setattr(observability, "_process_thread_count", lambda: 51)
     monkeypatch.setattr(observability, "_cgroup_pid_count", lambda: 82)
+    monkeypatch.setattr(observability, "_process_open_fd_count", lambda: 15)
 
     body = observability.render_prometheus_metrics({}).decode()
 
     assert (
         "cradlewise_bridge_process_threads 51\n" in body,
         "cradlewise_bridge_cgroup_pids 82\n" in body,
-    ) == (True, True)
+        "cradlewise_bridge_process_open_fds 15\n" in body,
+    ) == (True, True, True)
 
 
 def test_unavailable_pid_metrics_are_omitted(monkeypatch) -> None:

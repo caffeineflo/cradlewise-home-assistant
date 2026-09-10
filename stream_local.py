@@ -15,7 +15,6 @@ import asyncio
 import concurrent.futures
 import json
 import logging
-import random
 import signal
 import socket
 import ssl
@@ -103,94 +102,53 @@ def _discovery_bind_address():
     return address
 
 
+def _discovery_callback(bind_address):
+    """Broadcast a callback request and bound both accept and receive time."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_server:
+        tcp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        tcp_server.bind((bind_address, 0))
+        tcp_server.listen(1)
+        tcp_server.settimeout(DISCOVERY_TCP_TIMEOUT_S)
+        tcp_port = tcp_server.getsockname()[1]
+        message = json.dumps(
+            {"cradlewise_mobile_port": str(tcp_port), "device_id": DEVICE_ID}
+        ).encode()
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp_sock:
+            udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            for _ in range(DISCOVERY_BROADCASTS_PER_ATTEMPT):
+                udp_sock.sendto(message, ("255.255.255.255", DISCOVERY_UDP_PORT))
+        client_sock, address = tcp_server.accept()
+        with client_sock:
+            client_sock.settimeout(DISCOVERY_TCP_TIMEOUT_S)
+            return address[0], client_sock.recv(4096)
+
+
 def discover_crib(cradle_id=None):
-    """Discover crib IP via the Cradlewise UDP broadcast protocol.
-
-    Sends a UDP broadcast to port 5055 with a TCP callback port.
-    The crib connects back to our TCP server and sends its cradle ID.
-    We extract the crib's IP from the incoming TCP socket.
-
-    Returns (ip, cradle_id) on success, raises RuntimeError on failure.
-    """
+    """Discover a crib using bounded UDP broadcast and TCP callback attempts."""
     bind_address = _discovery_bind_address()
     for attempt in range(1, DISCOVERY_MAX_ATTEMPTS + 1):
         log.info("Discovery attempt %d/%d...", attempt, DISCOVERY_MAX_ATTEMPTS)
-
-        # Open a TCP server on a random port for the crib to connect back to
-        tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        tcp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        tcp_port = random.randint(10000, 60000)
-        tcp_server.bind((bind_address, tcp_port))
-        tcp_server.listen(1)
-        tcp_server.settimeout(DISCOVERY_TCP_TIMEOUT_S)
-
-        # Send UDP broadcast
-        udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-
-        broadcast_msg = json.dumps(
-            {
-                "cradlewise_mobile_port": str(tcp_port),
-                "device_id": DEVICE_ID,
-            }
-        ).encode()
-
-        for i in range(DISCOVERY_BROADCASTS_PER_ATTEMPT):
-            udp_sock.sendto(broadcast_msg, ("255.255.255.255", DISCOVERY_UDP_PORT))
-        log.info(
-            "Sent %d broadcasts on UDP port %d (callback TCP port %d)",
-            DISCOVERY_BROADCASTS_PER_ATTEMPT,
-            DISCOVERY_UDP_PORT,
-            tcp_port,
-        )
-        udp_sock.close()
-
-        # Wait for the crib to connect back
         try:
-            client_sock, addr = tcp_server.accept()
-            crib_ip = addr[0]
-            log.info("TCP connection from %s", crib_ip)
-
-            with client_sock:
-                data = client_sock.recv(4096)
-            tcp_server.close()
-
-            if data:
-                try:
-                    info = json.loads(data.decode())
-                    if not isinstance(info, dict):
-                        log.warning("Non-object TCP response: %s", data[:100])
-                        continue
-                    found_cradle_id = info.get("cradleId", "")
-                    log.info(
-                        "Discovered crib: ip=%s cradle_id=%s",
-                        crib_ip,
-                        found_cradle_id,
-                    )
-
-                    if cradle_id and found_cradle_id != cradle_id:
-                        log.warning(
-                            "Cradle ID mismatch: expected %s, got %s",
-                            cradle_id,
-                            found_cradle_id,
-                        )
-                        continue
-
-                    return crib_ip, found_cradle_id or cradle_id
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    log.warning("Non-JSON TCP response: %s", data[:100])
-            else:
-                log.info("Crib connected but sent no data, using IP %s", crib_ip)
-                return crib_ip, cradle_id
-
-        except TimeoutError:
-            log.info("No response on attempt %d", attempt)
-            tcp_server.close()
-            continue
+            crib_ip, data = _discovery_callback(bind_address)
         except OSError as exc:
-            log.warning("Discovery error on attempt %d: %s", attempt, exc)
-            tcp_server.close()
+            log.warning("Discovery attempt %d failed: %s", attempt, exc)
             continue
+        if not data:
+            log.info("Crib connected but sent no data, using IP %s", crib_ip)
+            return crib_ip, cradle_id
+        try:
+            info = json.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            log.warning("Discovery callback did not contain valid JSON")
+            continue
+        if not isinstance(info, dict):
+            log.warning("Discovery callback did not contain an object")
+            continue
+        found_cradle_id = info.get("cradleId", "")
+        if cradle_id and found_cradle_id != cradle_id:
+            log.warning("Discovery callback belongs to a different crib")
+            continue
+        return crib_ip, found_cradle_id or cradle_id
 
     raise RuntimeError(
         f"Crib discovery failed after {DISCOVERY_MAX_ATTEMPTS} attempts. "
@@ -213,12 +171,9 @@ def discover_crib_cloud(
     Returns the IP string, or raises RuntimeError on failure.
     """
     try:
-        from cradlewise_api import (
-            authenticate,
-            get_aws_credentials,
-            get_cradle_ip,
-            get_credentials_interactive,
-        )
+        from cradlewise_client.cloud import CloudAccountClient
+
+        from cradlewise_api import get_credentials_interactive
     except ImportError as exc:
         raise RuntimeError("cradlewise_api module not found") from exc
 
@@ -229,11 +184,10 @@ def discover_crib_cloud(
         if not allow_interactive:
             raise RuntimeError("Cloud discovery credentials are not configured")
         email, password = get_credentials_interactive()
-    _, id_token = authenticate(email, password)
-    credentials, _ = get_aws_credentials(id_token)
+    cloud = CloudAccountClient(email=email, password=password)
 
     log.info("Cloud discovery: querying crib IP...")
-    ip = get_cradle_ip(cradle_id, credentials)
+    ip = cloud.get_cradle_ip(cradle_id)
     if not ip:
         raise RuntimeError("Cloud API returned no local IP for this cradle")
 
@@ -752,7 +706,10 @@ class CribStreamer:
         received_session_id = (
             stream_info.get("sessionId") if isinstance(stream_info, dict) else None
         )
-        return received_session_id in {self.session_id, "[empty]"}
+        return isinstance(received_session_id, str) and received_session_id in {
+            self.session_id,
+            "[empty]",
+        }
 
     async def _process_messages(self):
         while True:
@@ -768,6 +725,7 @@ class CribStreamer:
 
             direction = msg.get("direction")
             command = msg.get("command")
+            sdp = msg.get("sdp")
             stream_info = msg.get("streamInfo")
             received_session_id = (
                 stream_info.get("sessionId") if isinstance(stream_info, dict) else None
@@ -787,7 +745,11 @@ class CribStreamer:
                 else:
                     log.warning("Ignored duplicate SDP offer for active session")
             # Fallback: any message with an SDP offer we haven't handled
-            elif msg.get("sdp", {}).get("type") == "offer" and self._pc is None:
+            elif (
+                isinstance(sdp, dict)
+                and sdp.get("type") == "offer"
+                and self._pc is None
+            ):
                 if session_matches:
                     await self._handle_offer(msg)
             # ICE candidate from the crib (uses "ice" field)
@@ -865,6 +827,9 @@ class CribStreamer:
                         mqtt_client.loop_stop()
                     except BaseException as exc:
                         cleanup_errors.append(("MQTT network loop", exc))
+                # Failed tasks retain this frame in their traceback. Do not
+                # retain the stopped client's socketpair until cyclic GC runs.
+                mqtt_client = None
             if message_task is not None:
                 try:
                     await asyncio.gather(message_task, return_exceptions=True)
