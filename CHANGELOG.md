@@ -7,6 +7,27 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-09-09
+
+### Fixed
+
+- Require fresh crib/service liveness before enabling cloud commands. An AWS
+  MQTT connection or cached shadow alone no longer implies an active crib.
+- Retain the previous device registration during certificate repair, and
+  clean up newly created registrations when setup or repair is cancelled.
+- Release stopped MQTT client references after failed streaming sessions so
+  file descriptors do not accumulate while tracebacks remain alive.
+- Bound HTTP worker creation and discovery callback reads, and tolerate
+  malformed session IDs and optional SDP fields in video signaling.
+
+### Changed
+
+- Share authentication, state normalization, and broker certificate validation
+  between the client and media companion while retaining legacy state aliases.
+- Include open file descriptor counts in optional, label-free bridge metrics.
+- Clarify that initial broker CA pinning requires a trusted network, and that
+  native Home Assistant wake recording provides short, best-effort pre-roll.
+
 ## [0.2.8] - 2026-09-09
 
 ### Fixed
