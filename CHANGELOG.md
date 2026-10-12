@@ -11,6 +11,9 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- Accept Android 2.60.12 local ICE messages with `ice` or `iceMsg` and
+  sessionless candidates addressed to the active stream. Reject messages for
+  other streams, stale sessions, and our own candidate echoes.
 - Update the companion's locked PyJWT and urllib3 dependencies to address
   upstream security advisories, refresh the pinned Python container base, and
   update inherited liblzma5 for newly available Debian fixes.

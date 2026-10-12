@@ -2,7 +2,7 @@
 
 **App version reviewed:** 2.60.12 (218), compared with 2.59.9 (216)
 **Base URL:** AWS API Gateway (us-east-1)
-**Auth:** AWS Cognito JWT tokens in Authorization header
+**Client auth:** SigV4 using temporary AWS credentials obtained through Cognito
 **HTTP client:** OkHttp via AWS Amplify (30s socket timeout, 65.5s connection timeout)
 
 ## Cradle Operations
@@ -35,6 +35,20 @@ local companion RTSP stream, so this review doesn't add remote media or
 session-outcome uploads. Account discovery, pairedUsers/v3 certificate
 provisioning, online status, and normal cloud state/control paths remain
 compatible.
+
+### Online status is not shadow freshness
+
+`onlineStatus` returns separate `is_cradle_alive` and
+`is_cradle_service_alive` booleans. Both must be true for the client to treat
+the crib service as online. HA checks these flags every 60 seconds in modes
+with account credentials and expires cloud command eligibility after 90
+seconds without a positive status check or operational MQTT event.
+
+`onlineStatus/v2` contains a JSON-encoded `state_message` and its report time.
+That message, like `/state`, can be cached. Fetching it successfully is not
+proof that the crib is currently alive. V2 remains useful for local IP
+discovery. MQTT `cradle_state` messages are parsed separately from the shadow:
+offline, reboot, recovery, and firmware-update modes are not active operation.
 
 ## Baby Profile
 
