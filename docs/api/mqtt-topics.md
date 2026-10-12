@@ -1,6 +1,6 @@
 # MQTT Topics & Device Shadow
 
-**App version:** 2.55.5
+**App version reviewed:** 2.60.12 (218), compared with 2.59.9 (216)
 
 ## Connection Types
 
@@ -21,6 +21,12 @@ The app maintains two MQTT connections:
 | Auto-reconnect | manual | false (manual) |
 | QoS | 0 | 0 |
 | Max retries | 3 | -- |
+
+Android 2.60.12 replaces its remote AWS IoT MQTT client with the AWS CRT
+MQTT 5 client. The endpoint, mutual TLS, device UUID client ID, port 8883,
+five-second keepalive, QoS 0, and state/control topic strings remain the same.
+This app-side library change doesn't establish a server requirement for MQTT 5;
+the HA client retains its existing MQTT transport.
 
 ## Topics
 
@@ -59,7 +65,10 @@ The app maintains two MQTT connections:
 | `/janus-server/{ip}/to-janus` | Publish | Send video requests to Janus |
 | `/janus-server/{ip}/from-janus` | Subscribe | Receive video responses from Janus |
 
-Current Janus server IP: `34.226.215.23`
+The legacy Janus MQTT route uses `34.226.215.23`. The 2.60.12 remote-video
+workflow also negotiates P2P publish/subscribe topics through `videoRoom` and
+uses Janus WebSocket signaling. Those topics come from the response fields
+`pp_topic_pub` and `pp_topic_sub`; they aren't fixed local-room topics.
 
 ## Device Shadow Structure
 
@@ -112,11 +121,15 @@ soothing/settings controls:
 | Area | Desired fields |
 |------|----------------|
 | Bounce | `actuator.on`, `actuator.disableBouncing`, `actuator.bounceSuperGentle`, `actuator.bounceAlwaysOn`, `actuator.bounceAlwaysOnIntensity`, `actuator.tapDetectionEnable`, `actuator.pushGestureEnable`, `actuator.amplitude`, `actuator.duration`, `bounceMode`, `bounceLevel`, `bounceSetting`, `responsivitySetting` |
-| Music/sound | `music.play`, `music.volume`, `musicMode`, `musicLevel`, `musicDuration`, `volumeProfile` |
+| Music/sound | `soundSynth.play`, `soundSynth.volume`, `musicMode`, `musicLevel`, `musicDuration`, `volumeProfile` |
 | Night light | `light.indicatorBrightness`, `light.indicatorBrightnessMode` |
 | Sleep settings | `keepMusicOnDuringSleep`, `keepMusicOnDuringSleepLevel`, `keepBounceOnDuringSleep`, `keepBounceOnDuringSleepLevel`, `autoModeLockOn`, `autoModeLockDuration` |
 | Limits/start recipe | `maxBounceLimit`, `maxVolumeLimit`, `startRecipeEnabled`, `startRecipeMusicLevel`, `startRecipeBounceLevel`, `startRecipeLockDuration` |
 | Control | `control.adaptiveSoothingEnabled`, `control.crySensitivity` |
+
+Music play/volume writes preserve the current `soundSynth` ambience, color,
+heartbeat/breath volume, and track name. The reported-state model,
+`StateVariable` declarations, and shadow parser remain unchanged in 2.60.12.
 
 The APK also contains methods for setup/diagnostic/privacy actions, including
 calibration start, hardware self-test, breath torso/keepalive data, time zone

@@ -8,8 +8,11 @@ This project is based on interoperability research against the Cradlewise
 Android app and crib firmware. It is not affiliated with or supported by
 Cradlewise.
 
-The current protocol surface is validated against Android app 2.55.5
-(version code 204) and live crib firmware 0.2.73.
+The integration's protocol surface was reviewed against Android app 2.60.12
+(version code 218), compared with 2.59.9. See the
+[compatibility review](docs/process/apk-review-2.60.12.md) for workflow changes.
+The existing live transport observations used crib firmware 0.2.73; this APK
+review did not connect to the crib or verify newer firmware.
 
 ## Purpose and scope
 

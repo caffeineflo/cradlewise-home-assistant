@@ -1,6 +1,9 @@
 # Feature Gates & Internet-Free Mode
 
-**App version:** 2.55.5
+**App version reviewed:** 2.60.12 (218), compared with 2.59.9 (216)
+
+The feature registry and condition implementations are unchanged in this
+comparison. Server-provided feature configuration can still vary by account.
 
 ## Overview
 
