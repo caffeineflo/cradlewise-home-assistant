@@ -146,8 +146,10 @@ using its local state or command path.
 
 Home Assistant **2026.6.0 or newer** is required. The certificate repair flow
 imports `RepairsFlowResult`, which first ships in that release. CI tests both
-2026.6.0 and 2026.9.1, including setup without media dependencies. This minimum
+2026.6.0 and 2026.10.1, including setup without media dependencies. This minimum
 tracks the integration's API requirements, not the latest available HA release.
+Use current Home Assistant releases for upstream dependency security fixes;
+Home Assistant manages its runtime dependencies separately from the companion.
 
 Add the repository to HACS directly:
 
