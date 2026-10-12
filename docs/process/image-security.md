@@ -1,6 +1,6 @@
 # Bridge image security
 
-Reviewed: 2026-09-09. Revisit by 2026-09-16, before the next release, or when a
+Reviewed: 2026-10-11. Revisit by 2026-10-18, before the next release, or when a
 scanner reports a new fixable high/critical finding, whichever comes first.
 
 This applies to the optional bridge container, not Home Assistant's own image
@@ -36,17 +36,21 @@ also require a base-image digest update.
 
 ## Current findings
 
-The hardened candidate removes pip and its vendored packages, plus uv and uvx,
-from the final image. This removes four fixable package/advisory records across
-three distinct advisories found in the previous runtime. Build tools remain
-in the build stage only. The build-stage uv pin is also updated to 0.12.12;
-its AMD64 and ARM64 images have no high/critical findings in the same scanner database.
+The 0.2.10 candidate refreshes the pinned Python base, updates the locked PyJWT
+and urllib3 dependencies to 2.15.1 and 2.8.0, and uses uv 0.13.0 in the build
+stage only. Build tools remain excluded from the final runtime.
 
-The 2026-09-09 scan still reports 229 high/critical package/advisory records per architecture,
-covering 57 distinct advisories in Debian packages. Seven records are critical.
+The [2026-10-11 candidate scan](https://github.com/caffeineflo/cradlewise-home-assistant/actions/runs/38187746457)
+reports no Python package findings and no fixable high/critical findings on
+either architecture. The complete reports still contain 216 high/critical
+package/advisory records per architecture, covering 50 distinct advisories in
+Debian packages. One record is critical. Each report also contains 297 medium,
+186 low, and 24 unknown-severity records.
+
 Repeated records across FFmpeg binary packages are not separate vulnerabilities.
-The scanner lists no fixed Debian package version for these findings. That does
-not mean upstream has no fix, or that the image is vulnerability-free. Debian's
+The scanner lists no fixed Debian package version for the remaining high/critical
+findings. That does not mean upstream has no fix, or that the image is
+vulnerability-free. Debian's
 [FFmpeg tracker](https://security-tracker.debian.org/tracker/source-package/ffmpeg)
 and the other source-package trackers remain the update authority.
 
@@ -57,21 +61,21 @@ privileges, or dependencies change.
 
 | Source package | High/critical advisory IDs | Assessment of the current bridge path |
 |---|---|---|
-| FFmpeg | CVE-2026-58049, CVE-2026-64830, CVE-2026-64831, CVE-2026-64832, CVE-2026-64833, CVE-2026-64834, CVE-2026-64835, CVE-2026-66036, CVE-2026-66039, CVE-2026-66040, CVE-2026-66041, CVE-2026-70628, CVE-2026-70632, CVE-2026-75142, CVE-2026-75143, CVE-2026-75144, CVE-2026-75146 | The sink explicitly selects H.264 or raw video and PCM inputs, with RTSP output. It does not select RASC, HEVC/Vulkan, NVDEC, DTS/SPDIF, ASF, ADX, CAF/MACE, PNG/APNG, subtitle/QR/denoise paths, CFHD, MPEG-PS, RIST, Dirac, or DASH. No affected path identified in the configured sink; do not generalize this to arbitrary FFmpeg use. |
+| FFmpeg | CVE-2026-58049, CVE-2026-64830, CVE-2026-64832, CVE-2026-64833, CVE-2026-64834, CVE-2026-64835, CVE-2026-66036, CVE-2026-66039, CVE-2026-66040, CVE-2026-66041, CVE-2026-70628, CVE-2026-70632, CVE-2026-75142, CVE-2026-75143, CVE-2026-75144, CVE-2026-75146 | The sink explicitly selects H.264 or raw video and PCM inputs, with RTSP output. It does not select RASC, HEVC/Vulkan, NVDEC, DTS/SPDIF, ASF, ADX, CAF/MACE, PNG/APNG, subtitle/QR/denoise paths, CFHD, MPEG-PS, RIST, Dirac, or DASH. No affected path identified in the configured sink; do not generalize this to arbitrary FFmpeg use. |
 | util-linux | CVE-2026-76642, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410 | Mount, namespace, and privileged helper operations are not used. Non-root, dropped capabilities, and no-new-privileges constrain these local escalation paths. |
-| gzip | CVE-2026-41992 | The service does not invoke gzip on uploaded archives. |
 | acl | CVE-2026-54369 | No privileged path-based ACL operations in the bridge. |
-| cJSON | CVE-2026-16554, CVE-2026-29036, CVE-2026-67215, CVE-2026-67216 | MQTT/HTTP JSON uses Python's parser, not cJSON. No cJSON Patch/Compare path identified. The first advisory concerns 32-bit builds; only 64-bit images are supported. Transitive library use has not been exhaustively traced. |
-| expat | CVE-2026-76956, CVE-2026-76957 | No user-supplied XML endpoint. Transitive XML/error-response parsing is not proven unreachable; retain as an unresolved dependency risk. |
-| glib2.0 | CVE-2026-58010, CVE-2026-58011, CVE-2026-58012, CVE-2026-58013, CVE-2026-58014, CVE-2026-58015, CVE-2026-58016 | No configured D-Bus, GVariant, GLib regex, keyfile, or GIOChannel input path. Indirect library calls have not been exhaustively traced. |
-| mbedtls | CVE-2026-25835, CVE-2026-34872, CVE-2026-34873, CVE-2026-34875 | MQTT and WebRTC use OpenSSL-backed Python libraries. No Mbed TLS server, session-resumption, or FFDH export path identified. Its presence through media dependencies is not proof of complete unreachability. |
+| cJSON | CVE-2026-16554, CVE-2026-29036, CVE-2026-67215, CVE-2026-67216, CVE-2026-87933 | MQTT/HTTP JSON uses Python's parser, not cJSON. No cJSON Patch/Compare path identified. The first advisory concerns 32-bit builds; only 64-bit images are supported. Transitive library use has not been exhaustively traced. |
+| expat | CVE-2026-66046, CVE-2026-76956, CVE-2026-76957, CVE-2026-77214, CVE-2026-93990 | No user-supplied XML endpoint. Transitive XML/error-response parsing is not proven unreachable; retain as an unresolved dependency risk. |
+| gnutls28 | CVE-2026-88647, CVE-2026-88648 | MQTT and WebRTC use OpenSSL-backed Python libraries. Indirect media-library TLS paths have not been fully traced; retain as an unresolved dependency risk. |
 | ncurses | CVE-2025-69720 | The bridge does not invoke infocmp or accept terminal descriptions. |
 | libsndfile | CVE-2026-37555 | No WAV/IMA ADPCM file ingestion; audio enters the sink as PCM. |
-| sqlite3 | CVE-2026-11822, CVE-2026-11824 | The bridge does not open SQLite databases or execute FTS5 queries. |
 | systemd | CVE-2026-16742 | systemd-homed is not run; the Python process is the container entry point. |
 | tiff | CVE-2026-36849, CVE-2026-52490 | No TIFF input or tiffcrop invocation. Snapshots are generated as JPEG from decoded video. |
-| libxml2 | CVE-2026-6653, CVE-2026-86140 | No configured XML input. Indirect library parsing is not proven unreachable; retain as an unresolved dependency risk. |
-| perl | CVE-2026-13221, CVE-2026-42496, CVE-2026-42497, CVE-2026-48962, CVE-2026-57432, CVE-2026-57433, CVE-2026-8376, CVE-2026-9538 | No Perl interpreter, regex, archive extraction, or deserialization is invoked by the service. CVE-2026-8376 additionally requires a 32-bit build. |
+| libxml2 | CVE-2026-6653, CVE-2026-74860, CVE-2026-86138, CVE-2026-86139, CVE-2026-86140, CVE-2026-86142, CVE-2026-86143, CVE-2026-86144 | No configured XML input. Indirect library parsing is not proven unreachable; retain as an unresolved dependency risk. |
+| perl | CVE-2026-9538 | No Perl interpreter, regex, archive extraction, or deserialization is invoked by the service. |
+| librsvg | CVE-2026-96889 | The service does not accept SVG input. Indirect media-library use has not been fully traced; retain as an unresolved dependency risk. |
+| libx11 | CVE-2026-88806 | The service does not open an X display. Indirect media-library use has not been fully traced; retain as an unresolved dependency risk. |
+| libxrender | CVE-2026-88807 | The service does not open an X display. Indirect media-library use has not been fully traced; retain as an unresolved dependency risk. |
 
 ## Follow-up and limits
 
