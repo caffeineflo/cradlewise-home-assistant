@@ -1,6 +1,6 @@
 # REST API Endpoints
 
-**App version:** 2.55.5
+**App version reviewed:** 2.60.12 (218), compared with 2.59.9 (216)
 **Base URL:** AWS API Gateway (us-east-1)
 **Auth:** AWS Cognito JWT tokens in Authorization header
 **HTTP client:** OkHttp via AWS Amplify (30s socket timeout, 65.5s connection timeout)
@@ -15,11 +15,26 @@
 | POST | `/cradles/{cradleId}/babyProfile/v2` | Update baby profile with location data |
 | GET | `/cradles/{cradleId}/state` | Get cloud-backed cradle state/shadow payload |
 | GET | `/cradles/{cradleId}/videoRoom` | Get Janus video room configuration |
+| POST | `/cradles/{cradleId}/videoRoom?deviceId={deviceId}` | Negotiate remote P2P/Janus streaming; GET with the same query is the fallback |
 | GET | `/cradles/{cradleId}/firmwareData` | Get firmware update data |
 | POST | `/cradles/{cradleId}/firmware/update` | Initiate firmware update |
 | POST | `/cradles/{cradleId}/calibration/status` | Update calibration status |
 | POST | `/cradles/pairedUsers/v3` | Get paired users for cradle |
 | GET | `/cradles/{cradleId}/pairedStatus` | Get cradle paired status |
+
+### Remote video negotiation in 2.60.12
+
+`WebRtcModule` adds a POST-first negotiation flow on the existing `videoRoom`
+path. The body is `{}` or includes `pending_outcomes` from previous app video
+sessions. The response adds `stream_strategy` (`both`, `janus_only`, or
+`p2p_only`), `pp_topic_pub`, `pp_topic_sub`, `pp_grace_period_secs`,
+`quality_window_secs`, `pp_decision_reason`, and `pp_keep_alive_seconds`.
+
+These fields support the app's remote streaming race. HA's camera uses the
+local companion RTSP stream, so this review doesn't add remote media or
+session-outcome uploads. Account discovery, pairedUsers/v3 certificate
+provisioning, online status, and normal cloud state/control paths remain
+compatible.
 
 ## Baby Profile
 
@@ -98,3 +113,5 @@
 - `com/cradlewise/nini/app/aws/AwsBackendService.java`
 - `com/cradlewise/nini/app/model/RemoveDevicesRequest.java`
 - `com/cradlewise/nini/app/model/RemoveDevicesResponse.java`
+- `com/cradlewise/nini/app/di/WebRtcModule.kt` (recovered as Java)
+- `com/cradlewise/nini/core/commons/api/model/VideoRoomResponse.java`

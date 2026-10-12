@@ -1,12 +1,15 @@
 # Device Discovery Protocol
 
-**App version:** 2.55.5
+**App version reviewed:** 2.60.12 (218), compared with 2.59.9 (216)
 **Protocol:** Custom UDP broadcast + TCP callback
 **UDP port:** 5055
 
 ## Overview
 
 The app discovers the Cradlewise crib on the local network using a custom UDP broadcast protocol. This is not mDNS/Bonjour -- it's a proprietary mechanism.
+
+The UDP broadcaster and discovery monitor are unchanged in the 2.60.12
+source comparison. Existing direct-IP and cross-VLAN guidance still applies.
 
 ## Discovery Flow
 

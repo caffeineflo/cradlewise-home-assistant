@@ -18,7 +18,12 @@ from cradlewise_local.encoded import (
 )
 from cradlewise_local.status import BridgeStatusStore
 from cradlewise_local.streamer import BridgeStreamer
-from stream_local import CribStreamer, _discovery_bind_address, discover_crib_race
+from stream_local import (
+    DEVICE_ID,
+    CribStreamer,
+    _discovery_bind_address,
+    discover_crib_race,
+)
 
 
 def test_h264_nal_types_reads_three_and_four_byte_start_codes():
@@ -80,6 +85,89 @@ def test_stream_session_filter_rejects_non_string_values(session_id):
     streamer.session_id = "active-session"
 
     assert not streamer._session_matches({"streamInfo": {"sessionId": session_id}})
+
+
+def test_stream_session_filter_rejects_offer_addressed_to_another_stream():
+    streamer = object.__new__(CribStreamer)
+    streamer.session_id = "active-session"
+
+    assert not streamer._session_matches(
+        {"streamInfo": {"sessionId": "active-session", "streamName": "other-stream"}}
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ice_field", "stream_info", "expected_count"),
+    [
+        ("ice", {"sessionId": "active-session"}, 1),
+        ("iceMsg", {"sessionId": "active-session"}, 1),
+        ("ice", {"streamName": DEVICE_ID}, 1),
+        ("iceMsg", {"streamName": DEVICE_ID}, 1),
+        ("iceMsg", {"streamName": DEVICE_ID, "sessionId": "[empty]"}, 1),
+        ("iceMsg", {"streamName": "other-stream"}, 0),
+        ("iceMsg", {"streamName": "other-stream", "sessionId": "active-session"}, 0),
+        ("iceMsg", {"streamName": DEVICE_ID, "sessionId": "stale-session"}, 0),
+        ("iceMsg", {}, 0),
+    ],
+)
+async def test_local_signaling_routes_ice_to_the_active_stream(
+    ice_field, stream_info, expected_count
+):
+    streamer = object.__new__(CribStreamer)
+    streamer.session_id = "active-session"
+    streamer._queue = asyncio.Queue()
+    candidates = []
+
+    async def add_ice_candidate(candidate):
+        candidates.append((candidate.ip, candidate.sdpMid, candidate.sdpMLineIndex))
+
+    streamer._pc = SimpleNamespace(
+        addIceCandidate=add_ice_candidate, localDescription=None
+    )
+    streamer._queue.put_nowait(
+        json.dumps(
+            {
+                "streamInfo": stream_info,
+                ice_field: {
+                    "candidate": (
+                        "candidate:1 1 UDP 2130706431 192.0.2.10 12345 typ host"
+                    ),
+                    "sdpMid": "video0",
+                    "sdpMLineIndex": 0,
+                },
+            }
+        )
+    )
+    task = asyncio.create_task(streamer._process_messages())
+    try:
+        await asyncio.sleep(0)
+        if task.done():
+            task.result()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert candidates == [("192.0.2.10", "video0", 0)] * expected_count
+
+
+@pytest.mark.asyncio
+async def test_stream_ignores_its_own_ice_candidate_echo():
+    streamer = object.__new__(CribStreamer)
+    candidate = "candidate:1 1 UDP 2130706431 192.0.2.10 12345 typ host"
+    candidates = []
+
+    async def add_ice_candidate(value):
+        candidates.append(value)
+
+    streamer._pc = SimpleNamespace(
+        addIceCandidate=add_ice_candidate,
+        localDescription=SimpleNamespace(sdp=f"a={candidate}\r\n"),
+    )
+
+    await streamer._handle_ice({"ice": {"candidate": candidate}})
+
+    assert candidates == []
 
 
 @pytest.mark.asyncio

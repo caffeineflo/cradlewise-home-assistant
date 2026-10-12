@@ -606,13 +606,20 @@ class CribStreamer:
             log.warning("ICE candidate received but no peer connection yet")
             return
 
-        log.info("Adding ICE candidate: %s", candidate_str[:80])
-
         # Strip "candidate:" prefix if present
         raw = candidate_str
         if raw.startswith("candidate:"):
             raw = raw[len("candidate:") :]
 
+        local_description = self._pc.localDescription
+        if (
+            local_description is not None
+            and f"a=candidate:{raw}" in local_description.sdp.splitlines()
+        ):
+            log.debug("Ignored echoed local ICE candidate on the shared room topic")
+            return
+
+        log.info("Adding ICE candidate: %s", candidate_str[:80])
         candidate = candidate_from_sdp(raw)
         candidate.sdpMid = sdp_mid
         candidate.sdpMLineIndex = (
@@ -703,6 +710,12 @@ class CribStreamer:
 
     def _session_matches(self, msg):
         stream_info = msg.get("streamInfo")
+        if isinstance(stream_info, dict) and stream_info.get("streamName") not in (
+            None,
+            "",
+            DEVICE_ID,
+        ):
+            return False
         received_session_id = (
             stream_info.get("sessionId") if isinstance(stream_info, dict) else None
         )
@@ -727,6 +740,9 @@ class CribStreamer:
             command = msg.get("command")
             sdp = msg.get("sdp")
             stream_info = msg.get("streamInfo")
+            ice = msg.get("ice")
+            if not isinstance(ice, dict):
+                ice = msg.get("iceMsg")
             received_session_id = (
                 stream_info.get("sessionId") if isinstance(stream_info, dict) else None
             )
@@ -752,12 +768,16 @@ class CribStreamer:
             ):
                 if session_matches:
                     await self._handle_offer(msg)
-            # ICE candidate from the crib (uses "ice" field)
-            elif msg.get("ice"):
-                if session_matches:
-                    await self._handle_ice(msg)
+            # Android 2.60.12 accepts ice/iceMsg with stream-addressed candidates.
+            elif isinstance(ice, dict) and ice:
+                if session_matches or (
+                    received_session_id is None
+                    and isinstance(stream_info, dict)
+                    and stream_info.get("streamName") == DEVICE_ID
+                ):
+                    await self._handle_ice({**msg, "ice": ice})
                 else:
-                    log.debug("Ignored ICE candidate for stale session")
+                    log.debug("Ignored ICE candidate for another stream or session")
             else:
                 log.debug(
                     "MQTT RX (ignored): command=%s direction=%s keys=%s",

@@ -1,10 +1,15 @@
 # Local Video Streaming Protocol
 
-**App version:** 2.55.5
+**App version reviewed:** 2.60.12 (218), compared with 2.59.9 (216)
 **Protocol:** WebRTC with MQTT signaling
 **MQTT topic:** `/{cradleId}/room`
 
 ## Overview
+
+Android 2.60.12 moves local signaling into `LocalStreamBranch` and
+`LocalSignalingCodec` in `core/webrtc`. The MQTT room topic and the
+`getOffer`, `sendResponse`, and five-second `keepAlive` exchange remain
+compatible with the companion.
 
 Local video streaming uses standard WebRTC for the media transport, with MQTT messages over the local broker as the signaling channel. No internet connection is required.
 
@@ -140,6 +145,14 @@ Sent periodically to maintain the stream.
 
 ## ICE Configuration
 
+`LocalSignalingCodec` accepts both `ice` and `iceMsg` candidate objects.
+Candidates can omit `streamInfo.sessionId` and identify their destination
+with `streamInfo.streamName`. SDP offers still require the active session ID
+or the legacy `[empty]` marker. The companion accepts sessionless ICE only
+when the stream name matches its own; explicit stale session IDs and other
+stream names are rejected. Candidates echoed from the companion's own local
+SDP are ignored because both signaling directions share the room topic.
+
 | Type | URL | Credentials |
 |------|-----|-------------|
 | STUN | `stun:stun.l.google.com:19302` | None |
@@ -167,7 +180,8 @@ override the cipher list. See `stream_local.py` for the workaround.
 
 ## Observed Video Parameters
 
-Verified by successfully streaming from a real crib:
+Verified by earlier streaming from a real crib; not remeasured during the
+2.60.12 APK review:
 
 | Property | Value |
 |----------|-------|
@@ -186,10 +200,10 @@ RTSP consumers.
 
 ## Session Management
 
-- **Session ID:** Epoch timestamp in milliseconds (string), generated fresh per `startVideo()` call
+- **Session ID:** The companion uses an epoch timestamp in milliseconds (string); the 2.60.12 start coroutine wasn't fully recovered.
 - **Session validation:** App checks that received `sessionId` matches its own. An `[empty]` sessionId from the crib is treated as valid (older firmware compatibility).
-- **Restart logic:** If the PeerConnection enters FAILED, CLOSED, or DISCONNECTED state, the app calls `restartVideo()` which resets and re-initiates the flow.
-- **Frame timeout:** If no video frames are received within 15 seconds of stream start, the app triggers a restart.
+- **Restart logic:** The 2.60.12 app delegates branch recovery to `WebRtcCoordinator`; the companion retains its existing watchdog and MQTT reconnect grace period.
+- **Frame timeout:** The app configures 15 seconds for local video and 45 seconds for its aggregate remote-video branch.
 
 ## Streaming States
 
@@ -219,13 +233,15 @@ Unit -> None -> Initiated -> Connecting -> Connected -> Closed
 
 ## Volume Control
 
-- Range: 0.0 to 40.0
+- Local app audio gain: `LocalStreamBranch.MAX_AUDIO_GAIN` is 10.0 in 2.60.12 (the legacy controller used a 0.0 to 40.0 range).
 - Controlled via WebRTC audio track
+
+This is phone playback gain, separate from the crib's `soundSynth.volume`.
 
 ## Source Files
 
-- `com/cradlewise/nini/app/wireless/webrtc/LocalWebRtc.java`
-- `com/cradlewise/nini/app/wireless/webrtc/LocalWebRtcMessage.java`
-- `com/cradlewise/nini/app/wireless/webrtc/WebRtcController.java`
+- `com/cradlewise/nini/core/webrtc/branch/LocalStreamBranch.java`
+- `com/cradlewise/nini/core/webrtc/signaling/LocalSignalingCodec.java`
+- `com/cradlewise/nini/core/webrtc/coordinator/WebRtcCoordinator.java`
+- `com/cradlewise/nini/app/wireless/ConnectionManagerV2.java`
 - `com/cradlewise/nini/app/wireless/webrtc/WebRtcConstants.java`
-- `com/cradlewise/nini/app/wireless/webrtc/RemoteWebrtc.java`

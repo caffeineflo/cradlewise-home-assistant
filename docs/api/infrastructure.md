@@ -1,6 +1,10 @@
 # Infrastructure & External Services
 
-**App version:** 2.55.5
+**App version reviewed:** 2.60.12 (218), compared with 2.59.9 (216)
+
+The packaged AWS Amplify configuration is byte-identical to 2.59.9. Live
+certificate-chain and media observations below are historical; this review
+didn't query the crib or AWS account endpoints.
 
 ## AWS Services
 
@@ -19,7 +23,7 @@
 | Property | Value |
 |----------|-------|
 | Region | us-east-1 |
-| Auth | Cognito JWT |
+| Client auth | SigV4 with temporary AWS credentials obtained through Cognito |
 | Client | AWS Amplify + OkHttp |
 | Socket timeout | 30,000ms |
 | Connection timeout | 65,536ms |
@@ -65,6 +69,7 @@
 | Type | URL | Username | Password |
 |------|-----|----------|----------|
 | STUN | `stun:stun.l.google.com:19302` | -- | -- |
+| STUN (remote P2P) | `stun:52.73.136.109:3478` | -- | -- |
 | TURN | `turn:ec2-34-226-215-23.compute-1.amazonaws.com:3478` | App-embedded credential (redacted) | App-embedded credential (redacted) |
 
 ### Janus WebRTC Gateway (Remote Streaming)
@@ -76,6 +81,13 @@
 | MQTT topic (recv) | `/janus-server/34.226.215.23/from-janus` |
 
 ### Remote WebRTC State Machine
+
+The sequence below describes the legacy Janus route. In 2.60.12,
+`RemoteRaceCoordinator` selects between P2P over server-provided MQTT topics
+and Janus video-room WebSocket signaling. `videoRoom` supplies the strategy,
+topics, timing, room configuration, and WebSocket authentication secret.
+The app generates HMAC-authenticated WebSocket headers with `X-Origin`,
+`X-CId`, `X-DId`, `X-Timestamp`, `X-SId`, and `X-Signed-Keys`.
 
 ```
 JanusClientConfigReceived
