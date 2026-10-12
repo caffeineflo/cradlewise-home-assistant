@@ -7,6 +7,18 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-10-11
+
+### Fixed
+
+- Update the companion's locked PyJWT and urllib3 dependencies to address
+  upstream security advisories, and refresh the pinned Python container base.
+
+### Changed
+
+- Refresh supported Python dependencies, build-stage uv, and pinned CI actions.
+- Test Home Assistant 2026.10.1 alongside the existing 2026.6.0 minimum.
+
 ## [0.2.9] - 2026-09-09
 
 ### Fixed
