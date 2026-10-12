@@ -12,7 +12,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Fixed
 
 - Update the companion's locked PyJWT and urllib3 dependencies to address
-  upstream security advisories, and refresh the pinned Python container base.
+  upstream security advisories, refresh the pinned Python container base, and
+  update inherited liblzma5 for newly available Debian fixes.
 
 ### Changed
 

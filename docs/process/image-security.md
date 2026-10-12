@@ -40,12 +40,15 @@ The 0.2.10 candidate refreshes the pinned Python base, updates the locked PyJWT
 and urllib3 dependencies to 2.15.1 and 2.8.0, and uses uv 0.13.0 in the build
 stage only. Build tools remain excluded from the final runtime.
 
-The [2026-10-11 candidate scan](https://github.com/caffeineflo/cradlewise-home-assistant/actions/runs/38187746457)
+The [initial 2026-10-11 candidate scan](https://github.com/caffeineflo/cradlewise-home-assistant/actions/runs/38187746457)
 reports no Python package findings and no fixable high/critical findings on
 either architecture. The complete reports still contain 216 high/critical
 package/advisory records per architecture, covering 50 distinct advisories in
-Debian packages. One record is critical. Each report also contains 297 medium,
-186 low, and 24 unknown-severity records.
+Debian packages. One record is critical. The complete reports also retain
+medium, low, and unknown-severity findings.
+
+The runtime explicitly refreshes inherited liblzma5 because the full report
+identified two fixable unknown-severity advisories in that package.
 
 Repeated records across FFmpeg binary packages are not separate vulnerabilities.
 The scanner lists no fixed Debian package version for the remaining high/critical

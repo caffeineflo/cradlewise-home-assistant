@@ -6,7 +6,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg openssl \
+    && apt-get install -y --no-install-recommends ffmpeg liblzma5 openssl \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip uninstall --yes pip \
     && rm -rf /usr/local/lib/python*/ensurepip
