@@ -7,6 +7,17 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- Update certifi and dnspython to address upstream security advisories.
+
+### Changed
+
+- Require Python 3.11 or newer for the optional media bridge. The standalone
+  client used by Home Assistant retains Python 3.10 support.
+- Refresh Python dependencies, pinned CI actions, and the Python 3.14 bridge
+  image. Defer Python 3.15 until the locked native dependencies provide wheels.
+
 ## [0.2.10] - 2026-10-11
 
 ### Fixed

@@ -5,7 +5,7 @@ By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Development setup
 
-Use Python 3.10 or newer and install the locked development environment:
+Use Python 3.11 or newer and install the locked development environment:
 
 ```bash
 uv sync --extra test
@@ -18,6 +18,9 @@ uv run --locked --extra test python -m pytest
 uv run --locked --extra test ruff check .
 uv run --locked --extra test ruff format --check .
 ```
+
+The standalone `cradlewise-client` package still supports Python 3.10. CI tests
+it separately on 3.10 without installing the media bridge.
 
 Home Assistant pins its own Python dependency graph, so its runtime tests use a
 separate environment rather than the bridge's lockfile. Follow the
