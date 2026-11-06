@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12", "3.14"]
+        python-version: ["3.10", "3.11", "3.12", "3.14"]
 
     steps:
       - name: Check out repository
@@ -46,10 +46,21 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Run shared-client tests on Python 3.10
+        if: matrix.python-version == '3.10'
+        run: >-
+          uv run --isolated --no-project --python 3.10
+          --with-editable ./packages/cradlewise-client
+          --with pytest==9.2.0 --with pytest-asyncio==1.4.1
+          python -m pytest tests/test_client_state.py tests/test_client_cloud.py
+          tests/test_client_certificates.py
+
       - name: Run tests
+        if: matrix.python-version != '3.10'
         run: uv run --locked --python "${{ matrix.python-version }}" --extra test python -m pytest
 
       - name: Compile Python files
+        if: matrix.python-version != '3.10'
         run: >-
           uv run --locked --python "${{ matrix.python-version }}" python -m compileall
           cradlewise_local custom_components packages tests stream_local.py cradlewise_api.py

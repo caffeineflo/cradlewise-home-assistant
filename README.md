@@ -387,6 +387,9 @@ Select the version matching the integration release you installed.
 
 ## Local Development
 
+The media bridge requires Python 3.11 or newer. The standalone
+`cradlewise-client` package used by Home Assistant still supports Python 3.10.
+
 Run tests:
 
 ```bash
