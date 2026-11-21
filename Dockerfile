@@ -1,4 +1,4 @@
-FROM python:3.14-slim@sha256:af8a5aa14780025dbfbcfbc81bd8a91ebd87711dd5b0f48ed71090949dd7cb1d AS runtime-base
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS runtime-base
 
 ENV PATH="/app/.venv/bin:$PATH" \
     OPENSSL_armcap=0 \
@@ -6,7 +6,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg liblzma5 openssl \
+    && apt-get install -y --no-install-recommends \
+        apt ffmpeg libbrotli1 libexpat1 liblzma5 librsvg2-2 openssl zlib1g \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip uninstall --yes pip \
     && rm -rf /usr/local/lib/python*/ensurepip
