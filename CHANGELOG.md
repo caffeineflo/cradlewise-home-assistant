@@ -7,9 +7,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-21
+
 ### Fixed
 
 - Update certifi and dnspython to address upstream security advisories.
+- Update apt, Brotli, Expat, librsvg, and zlib in the media bridge image
+  to address findings from the published image security scan.
 
 ### Changed
 
@@ -286,7 +290,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Return safe redacted diagnostics while an entry is temporarily unloaded
   during a reload.
 
-[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.10...v0.3.0
 [0.2.3]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/caffeineflo/cradlewise-home-assistant/compare/v0.2.0...v0.2.1
